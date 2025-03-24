@@ -1,0 +1,427 @@
+<meta charset="UTF-8">
+<title>Hội Cầu Lông - CNS 8 </title>
+
+<style>
+  
+  
+    .alert {
+      padding: 6px;
+      background-color: #f8d7da;
+      color: #721c24;
+      /* border: 1px solid black; */
+      border-radius: 3px;
+      
+    }
+    .table {
+      /* border-left: 1px solid rgb(0, 0, 0); */
+      border-bottom: 1px solid rgb(0, 0, 0);
+      
+    }
+    th{
+      position:  sticky;
+      top: 0px;
+      background-color: rgb(255 218 249);
+      color: rgb(0, 0, 0 , 75%);      
+      
+    }
+    
+    .button{
+      padding: 1px;
+      float: right;
+      border: 1px solid black;
+      margin-inline: 2px;
+    }
+
+    .table_head{
+      font-size: 14px;
+      border: 5px #ffffff solid;
+      border-radius: 5rem;
+    }
+
+    .table_column_width{
+      width: auto;
+      display: table-cell;
+      align-content: flex-start;
+    }
+    
+    .table_column{
+      border: 1px blueviolet solid;
+      font-size: 10 px;      
+    }
+
+    .table_body{
+      min-height: 25px;
+      max-height: 120px;
+      font-size: 13px;
+      /* font-weight: bold; */
+      /* color: rgb(0 31 121); */
+      color: #415364;
+      display: flex;
+      /* border-bottom: solid 1px; */
+      /* border-left: solid 1px; */
+      /* border-right: solid 1px; */
+      width: initial;
+      /* flex-wrap: wrap; */
+      align-items: center;  
+      text-wrap: balance;
+      margin: 5px 0px 5px 0px;
+      background: rgb(240, 245, 246);
+      border-right: 1px dashed rgb(184, 181, 255);
+      
+    }
+    .result-name {
+      transition: color 0.2s ease;
+    }
+
+    .table_body:hover .result-name {
+      color: rgba(255, 0, 0, 0.765); /* Màu sắc khác biệt khi di chuột vào */
+    }
+
+    .table_row_odd {
+        background-color:  rgb(249 249 251); /* Màu nền cho dòng số lẻ */
+        border-radius: .5rem;
+    }
+
+    .table_row_even {
+        background-color: #e7f5fd; /* Màu nền cho dòng số chẵn */
+        border-radius: .5rem;
+    }
+
+    .button_hiden {
+        display: none;
+    }
+
+    .button_show_on {
+      display: table-cell;
+    }
+</style>
+
+
+  <div class ="head_HomeShow">
+    <div style="text-align: center;"><h3 style="margin-block-start: 0;margin-block-end: 5px;"></h3></div>
+    
+    <table style="border-collapse: collapse; ">
+      <thead> 
+        <tr> <!-- Tiền sân -->
+          <th th colspan = 3 style=" background-color: rgba(246, 246, 246, 0);"></th>
+          <th class = "table_head">Tiền sân</th>
+          <% printGame.forEach(function show(game) { %> <!-- ROW: Tiền sân -->
+            <%  if(game.paid_all === 0){ %>
+              
+              <th class = "table_head" style="min-width: 156px; height: 30px;"> 
+                
+                <form action="/cns-update-game-paidall/<%=game.event_id%>" method="post">
+                  <input type="number" name="inputNumber" id="inputNumber_<%=game.event_id%>" placeholder="Nhập số tiền" style="width: 100px" onblur="setDefaultIfEmpty()" required>  
+                  <button type="button" id="yes_<%=game.event_id%>" onclick="validateAndSaveData('<%= game.event_id %>')">Lưu</button> 
+                          <!-- Đã thêm type="button" cho button để ngăn chặn hành vi mặc định submit của form. 
+                               Đã sửa id của input và button để đảm bảo tính duy nhất khi truy cập-->
+                </form>
+              </th>            
+            <% }else{ %>   
+              
+              <th class = "table_head" style="min-width: 156px; height: 30px;">
+                 
+                <% var paidAllAmount = game.paid_all; %>
+                <% function formatCurrency(amount) { return amount.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ","); } %>
+                <% var formattedAmount = formatCurrency(paidAllAmount); %>
+                <span id="paidAllAmount_<%=game.event_id%>"><%= formattedAmount %>k</span>
+                <button for="again" onclick="again_paid_all('<%=game.event_id%>')" style="font-size: 15px;; font-weight: bold;"> ⟳ </button> 
+                <!-- <button for="again" onclick="lock_paid_all('<%=game.event_id%>')" style="font-size: 15px;; font-weight: bold;"> 🔒 </button>  -->
+              </th>                 
+              
+              <% } %>
+  
+          <% }) %>
+        </tr>
+
+        <tr>  <!-- Sô lượng tham gia -->
+
+          <th th colspan = 3 style=" background-color: rgba(234, 230, 251, 0);"></th>
+
+          <th class = "table_head table_row_odd">Số lượng tham gia</th>
+
+          <% printGame.forEach(function show(game) { %> <!-- ROW: Sô lượng tham gia -->
+            <%  if(game.status === 1){ %>
+
+            <th class = "table_head table_row_odd">
+
+              Người: 
+              <% printjoin_yes.forEach(function show(join_yes) { %>
+                <%  if(game.event_id === join_yes.event_id){ %>
+                  <%= join_yes.yes %>
+                ✅ 
+                <button for="again" onclick="lock_play_all('<%=game.event_id%>')" style="font-size: 15px; font-weight: bold;"> 🔒 </button> 
+                <% } %>
+              <% }) %>
+            </th>
+            
+            <% }else{ %>             
+              <% } %>
+          <% }) %>
+          
+        </tr>
+
+        <tr >
+          <th class = "table_head" style="justify-content: space-around;">STT</th>
+                                            
+          <th class = "table_head">Họ Tên</th>
+
+          <th class = "table_head">Nickname</th>
+
+          <th class = "table_head">Thông Báo</th>
+          
+          
+          <% printGame.forEach(function show(game) { %>
+            <th class = "table_head" style="align-items: center;"> <!-- Buổi tập -->
+              <%= game.name %> 
+
+              <div class="Menu_Dropdown"> 
+                
+                <button class="Menu_Dropdown_Button " style="font-size: 11px; padding: 0px; border: 0px;" onclick="toggleMenu('Menu_Dropdown')">✍</button>
+                
+                <div class="Menu_Dropdown-content">
+                  
+                  <form style="display: table-cell; justify-content: space-between;"  action="/cns-change-game-name/<%=game.event_id%>" method="post">
+                    <label>Chỉnh sửa</label><br>
+                    <input style="width: 70%; justify-content: space-between;" type="text" name="newName" id="newName" value="<%= game.name %>">
+                    <input style="justify-content: space-between; " type="submit" value="Lưu"/>
+                  </form>
+
+                  <button for="no" style="font-size: 12px; padding: 0px;" onclick="delete_game('<%= game.event_id %>')">❌ Xóa buổi tập</button>
+                
+                </div>
+              </div> 
+
+              
+            </th>
+          <% }) %>
+          
+          <%  if(obj.printlimitGame < 9){ %>
+                
+            <th class = "table_head" > <!-- ROW: Thêm buổi tập -->
+              <button onclick="add_play('')">✚ Buổi tập</button> 
+            </th>
+
+          <% }else{ %>             
+            <% } %>
+          
+        </tr>
+
+        
+
+      </thead>
+
+      <tbody>
+        
+        <tr class = "table_column_width "> <!-- STT -->
+          <% print.forEach(function show(result) { %>
+              
+                <td class = "table_body table_row_<%= result.STT % 2 === 0 ? 'even' : 'odd' %>" onclick="show_t2('<%=result.STT%>')" style="justify-content: space-around; ">
+                   <span class="result-name"> 
+                     <%= result.STT %> 
+                  </span>                    
+                </td>
+                  
+
+          <% }) %>
+          <td class = "table_head">
+            <button onclick="add_player()">✚ Thành viên</button>                           
+         </td>
+          
+        </tr>    
+
+        <tr class = "table_column_width" style="width: 120px;"> <!-- Họ Tên -->
+            
+            <% print.forEach(function show(result) { %>
+              <%  if(result.status===1){ %>
+                
+                  <td class = "table_body table_row_<%= result.STT % 2 === 0 ? 'even' : 'odd' %>" onclick="show_t2('<%=result.STT%>')">
+                     <span class="result-name"> 
+                       <%= result.name %> 
+                    </span>                    
+                  </td>   
+
+            <% }else{ %> 
+              <% } %>
+            <% }); %>
+          
+        </tr>
+
+        <tr class = "table_column_width" style="width: 160px;"> <!-- Slogan -->
+
+          <% print.forEach(function show(result) { %>
+            <%  if(result.paid===0){ %>
+              
+                <td class = "table_body table_row_<%= result.STT % 2 === 0 ? 'even' : 'odd' %>" onclick="show_t2('<%=result.STT%>')">
+                   <span class="result-name"> 
+                    
+                      Coming soon
+                  </span>                    
+                </td>   
+
+          <% }else{ %> 
+            <td class = "table_body table_row_<%= result.STT % 2 === 0 ? 'even' : 'odd' %>" onclick="show_t2('<%=result.STT%>')">
+              <span class="result-name"> 
+                Đã đóng tiền
+             </span>                    
+           </td>
+            <% } %>
+          <% }); %>
+          
+        </tr>
+
+        <tr class = "table_column_width" style="width: 160px;"> <!-- Thông báo -->
+
+          <% print.forEach(function show(result) { %>
+            <%  if(result.paid===1){ %>
+              
+                <td class = "table_body table_row_<%= result.STT % 2 === 0 ? 'even' : 'odd' %> " onclick="show_t2('<%=result.STT%>')">
+                   <span class="result-name"> 
+                     Đã đóng tiền
+                  </span>                    
+                </td>
+
+          <% }else{ %> 
+                <td class = "table_body table_row_<%= result.STT % 2 === 0 ? 'even' : 'odd' %>" onclick="show_t2('<%=result.STT%>')">
+                  <span class="result-name"> 
+                    Coming soon
+                </span>                    
+              </td>
+            <% } %>
+          <% }); %>
+
+        </tr>
+
+        <% printGame.forEach(function show(game) { %>
+
+          <tr class = "table_column_width"> <!-- Buổi tập -->          
+            <% printallEventMember.forEach(function show(allEventMember) { %>
+                <%  if(allEventMember.join_play === 0 && allEventMember.event_id === game.event_id){ %>
+                  
+                    <td class = "table_body table_row_<%= allEventMember.STT % 2 === 0 ? 'even' : 'odd' %>" style="justify-content: space-around;">
+                      <span class="result-name"> 
+                        
+                          <button class = "button_<%= allEventMember.role === 0 ? 'show_on' : 'hiden' %>
+                                  for="yes" onclick="yes('<%=allEventMember.event_member_id%>')" style="margin-right: 20px; font-size: 13px; padding: 0px;">✅</button>
+                          <button class = "button_<%= allEventMember.role === 0 ? 'show_on' : 'hiden' %>
+                                  for="no" onclick="no('<%=allEventMember.event_member_id%>')" style="font-size: 13px; padding: 0px;">❌</button>
+                        
+                      </span>                    
+                    </td>   
+
+              <%  }else if(allEventMember.join_play === 1 && allEventMember.event_id === game.event_id ){ %>     
+                <!-- class = "button_<%= allEventMember.role === 0 ? 'show_on' : 'hiden' %> -->
+                  <td class = "table_body table_row_<%= allEventMember.STT % 2 === 0 ? 'even' : 'odd' %>" 
+                      style="color: #248f26; justify-content: space-around; border-radius: 0.5rem;"> 
+                      <span> Tham gia ||</span>     
+                      <span> 
+                        <% for (var n=0; n < obj.printpaidAll.length; n++) { %>
+                          <% if (allEventMember.event_id === obj.printpaidAll[n].event_id) { %>
+                            <%= obj.printpaidAll[n].divide %>k
+                          <% } %>
+                        <% } %>
+
+                      </span>   
+                          
+
+                      <button class = "button_<%= allEventMember.role === 0 ? 'show_on' : 'hiden' %>
+                              for="again" onclick="again('<%=allEventMember.event_member_id%>')" style="font-size: 15px;; font-weight: bold;"> ⟳</button>  
+                  </td> 
+
+              <% }else if (allEventMember.join_play === 2 && allEventMember.event_id === game.event_id ){ %> 
+
+                  <td class = "table_body table_row_<%= allEventMember.STT % 2 === 0 ? 'even' : 'odd' %>" 
+                      style="color: rgba(186, 2, 2, 0.863); justify-content: space-evenly;">
+                    <span> Không</span>           
+                    <button class = "button_<%= allEventMember.role === 0 ? 'show_on' : 'hiden' %>
+                            for="again" onclick="again('<%=allEventMember.event_member_id%>')" style="font-size: 15px; font-weight: bold;"> ⟳</button>           
+                  </td>
+
+              <% }else{ %>  
+                            
+                <% } %>
+            <% }); %>
+
+          </tr>            
+        <% }); %>       
+        
+      </tbody>  
+
+      <script>
+        
+        function saveData(mystt){ window.location.href = "/cns-update-game-paidall/" + mystt;}
+
+        function again_paid_all(mystt){ window.location.href = "/cns-update-game-paidall-again/" + mystt;}
+
+        function lock_play_all(mystt){
+          if(confirm("Bạn chắc chắn thực hiện khóa bình chọn không"))
+                  {window.location.href = "/cns-update-lock-game/" + mystt;} 
+          else{window.location.href = "#";}}             
+
+        function validateAndSaveData(eventId) {
+            var inputElement = document.getElementById('inputNumber_' + eventId );
+            if (inputElement.value.trim() === '') {
+                alert('Vui lòng nhập số tiền trước khi lưu!');
+            } else {
+              var form = inputElement.closest('form');
+              form.submit(); //form.submit() để gửi form đi với phương thức POST.
+            }
+        }
+
+        function setDefaultIfEmpty() {
+            var inputElement = document.getElementById('inputNumber');
+            if (inputElement.value.trim() === '') {
+                inputElement.value = '0';
+            }
+        }
+
+        function yes(mystt){ window.location.href = "/cns-join-yes/" + mystt;}
+
+        function again(mystt){ window.location.href = "/cns-join-again/" + mystt;}
+
+        function no(mystt){ window.location.href = "/cns-join-no/" + mystt;} 
+      
+        function add_play(mystt){ window.location.href = "/cns-add-new-game/" + mystt;} 
+
+        function add_player(){ 
+            if(confirm("Vui lòng liên hệ Admin: 0 CHÍNH 0 TÁI 1 TÔ PHỞ BÒ"))
+                    {window.location.href = "#" + mystt;} 
+            else{window.location.href = "#";}}  
+        
+        function delete_game(mystt){ 
+            if(confirm("Bạn chắc chắn thực hiện xóa không"))
+                    {window.location.href = "/cns-delete-game/" + mystt;} 
+            else{window.location.href = "#";}}  
+          
+        function change_gameName(mystt){ 
+          window.location.href = "/cns-change-game-name/" + mystt + "?newName=" + newName;} 
+
+        function toggleMenu(menuClass) {
+        var clickedButton = event.target;
+        var menu = clickedButton.nextElementSibling;
+
+        if (menu.style.display === 'block') {
+            menu.style.display = 'none';
+        } else {
+            var allMenus = document.querySelectorAll('.Menu_Dropdown-content');
+            allMenus.forEach(function (item) {
+                item.style.display = 'none';
+            });
+            menu.style.display = 'block';
+        }
+        var rowNumber = Array.from(document.getElementsByClassName('Menu_Dropdown')).indexOf(clickedButton.parentElement) + 1;
+        console.log('Đã click vào button của row ' + rowNumber);
+        }
+
+        document.addEventListener('click', function(event) {
+            var dropdowns = document.querySelectorAll('.Menu_Dropdown-content');
+
+            dropdowns.forEach(function (dropdown) {
+                if (!event.target.classList.contains('Menu_Dropdown_Button') && !dropdown.contains(event.target)) {
+                    dropdown.style.display = 'none';
+                }
+            });
+        });
+
+      </script>
+    </table>
