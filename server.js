@@ -1,3684 +1,2377 @@
-const  express = require('express');
-const  app = express();
+// server.js
+require('dotenv').config();
+const express     = require('express');
+const axios       = require('axios');
+const crypto      = require('crypto');
+const mysql       = require('mysql2/promise');
+const cors        = require('cors');
+const qs          = require('querystring');
+const cron        = require('node-cron');
+const chalk       = require('chalk'); // npm install chalk@4
+const { now } = require('moment');
+  
+  const yellow = chalk.bold.hex('#dcdcaa');
+  const green = chalk.green;
+  const blue = chalk.blue;
+  const red = chalk.red; //chalk.red.bold: đỏ đậm
+  const pink = chalk.hex('#ff86d2ff');
 
-app.use(express.urlencoded({extended: true, limit: '1mb'})); 
+const app  = express();
+const PORT = process.env.PORT || 9221;
+app.listen(PORT, () => {
+  console.log(`* Server is listening in ᶠᶸᶜᵏᵧₒᵤ!  http://localhost:${pink(PORT)} ꧁⎝ 𓆩༺✧༻𓆪 ⎠꧂`);
+});
 
-let path = require("path");
-const staticPath = path.join(__dirname, 'public');
-app.use('/public', express.static(staticPath));
+app.use(cors());
+app.use(express.json());
+app.use(express.static('public'));
 
-const bodyParser = require('body-parser');
-app.use(bodyParser.json());
+// --- 1. Cấu hình DB ---
+const pool = mysql.createPool({
+  host:              process.env.DB_HOST,
+  user:              process.env.DB_USER,
+  password:          process.env.DB_PASS,
+  database:          process.env.DB_NAME,
+  waitForConnections: true,
+  connectionLimit:   5
+});
 
-let pdf = require("html-pdf");
-const fs = require('fs');
-
-// set the view engine to ejs
-let ejs = require("ejs");
-app.set('view engine', 'ejs');
-
-// use res.render to load up an ejs view file
-const moment = require('moment');
-// hash User/Password
-const bcrypt = require('bcrypt');
-
-const session = require('express-session');
-    const sessionConfig = {
-        secret: 'secret-key',
-        resave: false,
-        saveUninitialized: true,
-        // cookie: { maxAge: 5 * 60 * 1000 } // Thời gian hết hạn là 3 giây
-    };
-    app.use(session(sessionConfig));
-
-    var mysql = require('mysql2');
-    const dbConfig = {
-        host: 'localhost',
-        user: 'root',
-        password: '123456789',
-        database: 'loc'
-    };
-    
-    let connection;
-    
-    function isConnectionActive(connection) {
-      return connection && connection._closed === false;
-    }
-
-    function establishConnection() {
-      if (isConnectionActive(connection)) {
-          console.log("Database connection is already active.");
-          return;
-      }
-        console.log("No Database connection. Create new connection is procresing...");
-        connection = mysql.createPool(dbConfig);
-        connection.getConnection(function(err) {
-            if (err) {
-                console.log("Error while connecting with database: ", err);
-            } else {
-                console.log("Database is connected");
-                // setTimeout(closeAndReconnect, 10*1000); // Đợi 10 giây trước khi đóng và mở kết nối mới
-            }
-        });        
-    }
-    establishConnection();
-
-    let activeConnections = [];
-
-    // Tạo một hàm để kiểm tra trạng thái của kết nối
-    function checkConnectionStatus(connection) {
-        return new Promise((resolve, reject) => {
-            connection.ping((err) => {
-                if (err) {
-                    reject(err); // Kết nối không hoạt động
-                } else {
-                    resolve(); // Kết nối hoạt động
-                }
-            });
-        });
-    }
-    
-    // Tạo một hàm để đếm số lượng kết nối đang hoạt động
-    async function countActiveConnections() {
-        let activeCount = 0;
-        
-        for (let connection of activeConnections) {
-            try {
-                await checkConnectionStatus(connection);
-                activeCount++;
-            } catch (error) {
-                // Kết nối không hoạt động
-            }
-        }
-        return activeCount;
-    }
-    activeConnections.push(connection);
-
-    // Đếm số lượng kết nối đang hoạt động và không hoạt động
-    async function countConnections() {
-        let totalConnections = activeConnections.length;
-        let activeCount = await countActiveConnections();
-        let inactiveCount = totalConnections - activeCount;
-
-        console.log("Tổng số kết nối: " + totalConnections);
-        console.log("Kết nối đang hoạt động: " + activeCount);
-        console.log("Kết nối không hoạt động: " + inactiveCount);
-    }
-
-    countConnections();
-
-    setInterval(establishConnection, 5 * 60 * 60 * 1000);
-    setTimeout(countConnections, (5 * 60 * 60 * 1000)-1);
-    
-
-const hashPassword = async (password) => {// Hàm để mã hóa mật khẩu
+(async () => { // Thông báo kết nối DATABASE và thời gian thực hiện kết nối
+  // 1. Bắt đầu đo thời gian
+  const startTime = process.hrtime.bigint();
   try {
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(password, salt);
-    return hashedPassword;
-  } catch (error) {
-    console.log('Lỗi mã hóa mật khẩu:', error);
-    throw error;
+  // 2. Mở kết nối
+    const conn = await pool.getConnection();
+  // 3. Tính thời gian đã trôi qua (ms)
+    const durationNs = process.hrtime.bigint() - startTime;
+    let durationMs = Number(durationNs / BigInt(1e6));
+    console.log(`「✔ ᵛᵉʳᶦᶠᶦᵉᵈ」 MySQL connected successfully! in ${durationMs} ms` );
+    console.log();
+    conn.release();
+  } catch (err) {
+    console.error('❌ MySQL connection failed:', err.message);
+    process.exit(1);
   }
-};
-
-// Chuyển đổi các hàm callback thành Promises
-const util = require('util');
-const query = util.promisify(connection.query).bind(connection);
-// const queryPromise = util.promisify(connection.query).bind(connection);
+})();
 
 
-    function executeQuery(query, params) {
-          return new Promise((resolve, reject) => {
-            connection.query(query, params, function (err, result) {
-              if (err) {reject(err);
-              } else {
-                resolve(result);}
-            });
-          });
-        }
+// --- 3. Hàm tạo signature cho OKX ---
+function getSignature(timestamp, method, requestPath, body = '') {
+  const preHash = timestamp + method + requestPath + body;
+  return crypto
+    .createHmac('sha256', process.env.OKX_SECRET_KEY)
+    .update(preHash)
+    .digest('base64');
+}
 
-// -----------------------------------API--------------------------------------//
-// --------------------------------API Login-----------------------------------//
 
-app.post('/register', async function(req, res) {
-  res.sendFile('/register');
-  });
+async function okxRequest(method, path, body = '') {
+  const timestamp = new Date().toISOString();
+  const signature = getSignature(timestamp, method, path, body);
 
-app.get('/register',  function(req, res) {
-  res.render('part/register', {
-    full_name: '',
-    user_name: '',
-    password: '',
-    department_id: '',
-    mail: '',
-    phone: ''
-  });
+  const headers = {
+    'OK-ACCESS-KEY': process.env.OKX_API_KEY,
+    'OK-ACCESS-SIGN': signature,
+    'OK-ACCESS-TIMESTAMP': timestamp,
+    'OK-ACCESS-PASSPHRASE': process.env.OKX_PASSPHRASE,
+    'Content-Type': 'application/json'
+  };
 
-});
+  const url = `https://www.okx.com${path}`; // ✅ Khai báo rõ ràng path
+  const config = { method, url, headers };
+  if (method === 'POST') config.data = body;
 
-app.post('/save', async function(req, res) {
-  const { full_name, user_name, password, department_id, mail, phone } = req.body;
-  const currentTime = moment();
-  const mysqlTimestamp = currentTime.format('YYYY-MM-DD HH:mm:ss');
-  let date_create = mysqlTimestamp;
+  const res = await axios(config);
+  return res.data;
+}
 
-  // Kiểm tra xem tên người dùng đã tồn tại chưa
-  connection.query('SELECT * FROM admin_user WHERE user_name = ?', [user_name], async function(error, existingUser) {
-    if (error) {
-      console.error(error);
-      return res.render('error', { error: 'Lỗi khi kiểm tra tên người dùng' });
-    }
+const symbols = ['BERA-USDT', 'IP-USDT', 'PARTI-USDT', 'KAITO-USDT', 'XAUT-USDT', 'WLFI-USDT', 'ONDO-USDT'];
+const ccys = ['BERA', 'IP', 'PARTI', 'KAITO', 'USDT', 'WLFI', 'ONDO'];
 
-    if (existingUser.length > 0) {
-      const errorMessage = 'Tên người dùng đã tồn tại. Vui lòng chọn tên người dùng khác.';
-      return res.render('part/register', { errorMessage: errorMessage, full_name, user_name, password, department_id, mail, phone, date_create });
-    }
+function formatDateTimeLocale(date) {
+  const timePart = date.toLocaleTimeString('en-GB');    // "HH:MM:SS"
+  const datePart = date.toLocaleDateString('en-GB');    // "DD/MM/YYYY"
+  return `${timePart}, ${datePart}`;
+}
 
-    try {
-      // Hash mật khẩu
-      const hashedPassword = await hashPassword(password);
+// Helper format thời gian chung
+function formatDateTime(input) {
+  const date    = new Date(input);
+  const day     = String(date.getDate()).padStart(2, '0');
+  const month   = String(date.getMonth() + 1).padStart(2, '0');
+  const year    = date.getFullYear();
 
-      // Thêm người dùng mới vào cơ sở dữ liệu
-      connection.query('INSERT INTO admin_user (full_name, user_name, password, department_id, mail, phone, date_create) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        [full_name, user_name, hashedPassword, department_id, mail, phone, date_create], function(error, result) {
-          if (error) {
-            console.error(error);
-            return res.render('error', { error: 'Lỗi khi lưu dữ liệu' });
-          }
+  const hour    = String(date.getHours()).padStart(2, '0');
+  const minute  = String(date.getMinutes()).padStart(2, '0');
+  const second  = String(date.getSeconds()).padStart(2, '0');
 
-          console.log("Insert into admin_user is successful!");
-          res.redirect('/register'); //Tạo trang thông báo Tạo user thành công, then res.redirect('/register') or trang view danh sách user
-        });
-    } catch (error) {
-      console.error(error);
-      res.render('error', { error: 'Lỗi khi băm mật khẩu' });
-    }
-  });
-});
+  return `${day}/${month}/${year} - ${hour}:${minute}:${second}`;
+}
 
-// Thêm một endpoint mới để xử lý đăng nhập và trả về JSON cho React native
-app.post('/api/login', async function(req, res) {
-  const { user_name, password } = req.body;
+/**
+ * Fetch Lending Rate History from OKX và lưu vào DB
+ * @param {string} [from] ISO date string, ví dụ "2025-07-01T00:00:00Z"
+ * @param {number} [top]  Số bản ghi muốn lấy (max 100)
+ */
+
+async function fetchAndStoreLendingRateHistory(from, top = 100) {
+  const method    = 'GET';
+  const basePath  = '/api/v5/finance/savings/lending-rate-history';
+  const qp        = {};
+
+  if (from) qp.after = new Date(from).getTime();
+  qp.limit = Math.min(parseInt(top, 10) || 100, 100);
+
+  const qsStr       = require('querystring').stringify(qp);
+  const requestPath = qsStr ? `${basePath}?${qsStr}` : basePath;
+  const ts          = new Date().toISOString();
+  const signature   = getSignature(ts, method, requestPath);
+  const url         = 'https://www.okx.com' + requestPath;
 
   try {
-    const rows = await query('SELECT * FROM admin_user WHERE user_name = ?', [user_name]);
+    const { data } = await axios.get(url, {
+      headers: {
+        'OK-ACCESS-KEY':        process.env.OKX_API_KEY,
+        'OK-ACCESS-SIGN':       signature,
+        'OK-ACCESS-TIMESTAMP':  ts,
+        'OK-ACCESS-PASSPHRASE': process.env.OKX_PASSPHRASE
+      }
+    });
 
+    const items = data.data || [];
+    for (const it of items) {
+      const ccy = it.ccy ?? null;
+      const amt = it.amt != null ? Number(it.amt) : null;
+      const rate= it.rate != null ? Number(it.rate) : null;
+      const recTs = it.ts ? new Date(Number(it.ts)) : null;
+
+      try {
+        await pool.execute(
+          `INSERT INTO lending_rate_history
+             (ccy, amt, rate, ts)
+           VALUES (?, ?, ?, ?)`,
+          [ccy, amt, rate, recTs]
+        );
+      } catch (e) {
+        console.warn('⚠️ Skip insert:', e.message);
+      }
+    }
+    const now = new Date();
+    console.log(`✅ Stored ${items.length} records --- Simple Earn --- : at ${formatDateTimeLocale(now)}.`); // SIMPLE EARN
+    return { ok: true, fetched: items.length };
+  } catch (err) {
+    console.error(`❌ Fetch error [${err.response?.status}]:`, err.message);
+    return { ok: false, error: err.response?.data?.msg || err.message };
+  }
+}
+
+cron.schedule('05 * * * *',
+  () => {
+    fetchAndStoreLendingRateHistory()
+      .then(() => console.log('🎉Simple Earn offer complete'), console.log())
+      .catch(e => console.error('❌ Error in fetch Simple Earn:', e));
+  },
+  { tz: 'Asia/Ho_Chi_Minh' }
+);
+
+
+
+
+// Fetch và lưu “Staking DeFi Offers” --- On-Chain Earn
+async function fetchDefiOffers() {
+  const method      = 'GET';
+  const requestPath = '/api/v5/finance/staking-defi/offers';
+  const timestamp   = new Date().toISOString();
+  const url         = 'https://www.okx.com' + requestPath;
+
+  const headers = {
+    'OK-ACCESS-KEY':        process.env.OKX_API_KEY,
+    'OK-ACCESS-SIGN':       getSignature(timestamp, method, requestPath),
+    'OK-ACCESS-TIMESTAMP':  timestamp,
+    'OK-ACCESS-PASSPHRASE': process.env.OKX_PASSPHRASE
+  };
+
+  try {
+    // console.log(`🔍 Fetching DeFi offers: ${url}`);
+    const { data } = await axios.get(url, { headers });
+    const items = data.data || [];
+
+    for (const item of items) {
+      // Destructure và gán fallback null
+      const ccy                      = item.ccy                      ?? null;
+      const productId                = item.productId                ?? null;
+      const protocol                 = item.protocol                 ?? null;
+      const protocolType             = item.protocolType             ?? null;
+      const term                     = item.term                     ?? null;
+      const apy                      = item.apy                      ?? null;
+      const earlyRedeem              = item.earlyRedeem              ?? null;
+      const investData               = item.investData               ?? [];
+      const earningData              = item.earningData              ?? [];
+      const state                    = item.state                    ?? null;
+      const redeemPeriod             = item.redeemPeriod             ?? [];
+      const fastRedemptionDailyLimit = item.fastRedemptionDailyLimit ?? null;
+
+      // Chuyển array/object thành JSON string, map undefined→null
+      const params = [
+        ccy,
+        productId,
+        protocol,
+        protocolType,
+        term,
+        apy,
+        earlyRedeem,
+        JSON.stringify(investData),
+        JSON.stringify(earningData),
+        state,
+        JSON.stringify(redeemPeriod),
+        fastRedemptionDailyLimit
+      ].map(v => v === undefined ? null : v);
+
+      // Insert vào MySQL
+      await pool.execute(
+        `INSERT INTO defi_offers
+          (ccy, productId, protocol, protocolType, term, apy, earlyRedeem,
+           investData, earningData, state, redeemPeriod, fastRedemptionDailyLimit)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        params
+      );
+    }
+    const now = new Date();
+    console.log(`✅ Stored ${items.length} records DeFi offers --- On-Chain Earn ---: at ${formatDateTimeLocale(now)}`);
+  } catch (err) {
+    console.error(
+      `❌ Lỗi khi fetch DeFi offers [${err.response?.status}]:`,
+      err.response?.data?.msg || err.message
+    );
+  }
+}
+
+// Chạy ngay và định kỳ mỗi 1 giờ
+// Cách 1: setInterval(fetchDefiOffers, 60*60*1000);
+// 25 * * * *   → chạy vào phút thứ 25 của mọi giờ  
+// Cách 2: cron.schedule();
+cron.schedule('05 * * * *',
+  () => {
+    // console.log();
+    // console.log('🕕 Starting hourly fetchDefiOffers at', new Date().toLocaleString());
+    fetchDefiOffers()
+      .then(() => console.log('🎉On-Chain Earn offer complete'), console.log())
+      .catch(e => console.error('❌ Error in fetch On-Chain Earn:', e));
+  },
+  { tz: 'Asia/Ho_Chi_Minh' }
+);
+
+app.post('/api/lending-rate-history/fetch', async (req, res) => {
+  const { from, top } = req.body;
+  if (from && isNaN(Date.parse(from))) {
+    return res.status(400).json({ error: 'Invalid from date' });
+  }
+  const result = await fetchAndStoreLendingRateHistory(from, top);
+  if (result.ok) {
+    res.json({ status: 'fetched', count: result.fetched });
+  } else {
+    res.status(500).json({ status: 'error', message: result.error });
+  }
+});
+
+
+function convertToDatetime(ms) {
+  if (!ms || ms === '0') return null;
+  return new Date(Number(ms)).toISOString().slice(0, 19).replace('T', ' ');
+}
+
+async function fetchAndStoreOrders() {
+  const method = 'GET';
+  const requestPath = '/api/v5/finance/staking-defi/orders-history';
+  const timestamp = new Date().toISOString();
+  const url         = 'https://www.okx.com' + requestPath;
+
+  const headers = {
+    'OK-ACCESS-KEY':        process.env.OKX_API_KEY,
+    'OK-ACCESS-SIGN':       getSignature(timestamp, method, requestPath),
+    'OK-ACCESS-TIMESTAMP':  timestamp,
+    'OK-ACCESS-PASSPHRASE': process.env.OKX_PASSPHRASE,
+    'Content-Type': 'application/json'
+  };
+
+  try {
+    const  response  = await axios.get(url, { headers });
+    const orders = response.data.data;
+
+    for (const order of orders) {
+      const {
+        ordId, productId, protocolType, apy, purchasedTime,
+        redeemedTime, tag, investData = [], earningData = []
+      } = order;
+
+      const invest = investData[0] || {};
+      const earn = earningData[0] || {}; // ✅ Sửa lỗi ở đây
+
+      const purchasedDatetime = convertToDatetime(purchasedTime);
+      const redeemedDatetime = convertToDatetime(redeemedTime);
+
+      // INSERT dòng invest đầu tiên
+      if (investData.length > 0) {
+        const invest = investData[0];
+        await pool.execute(
+          `INSERT INTO staking_activity (
+            ordId, productId, protocolType, ccy, amt, apy,
+            purchasedTime, redeemedTime, tag, type,
+            earningType, realizedEarnings
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON DUPLICATE KEY UPDATE
+            amt = VALUES(amt),
+            apy = VALUES(apy),
+            purchasedTime = VALUES(purchasedTime),
+            redeemedTime = VALUES(redeemedTime),
+            tag = VALUES(tag),
+            earningType = VALUES(earningType),
+            realizedEarnings = VALUES(realizedEarnings)`,
+          [
+            ordId, productId, protocolType, invest.ccy, invest.amt, apy,
+            purchasedDatetime, redeemedDatetime, tag, 'invest',
+            earn.earningType || null, earn.realizedEarnings || null
+          ]
+        );
+      }
+
+      // UPDATE dòng earning đầu tiên
+      if (earningData.length > 0) {
+        const earn = earningData[0];
+        await pool.execute(
+          `UPDATE staking_activity
+           SET earningType = ?, realizedEarnings = ?
+           WHERE ordId = ?`,
+          [earn.earningType, earn.realizedEarnings || 0, ordId]
+        );
+      }
+    }
+
+    console.log('✅ Dữ liệu đã được lưu vào MySQL');
+    
+  } catch (error) {
+    console.error('❌ Lỗi khi lấy hoặc lưu dữ liệu:', error.response?.data || error.message);
+  }
+}
+
+// fetchAndStoreOrders();
+
+
+
+async function fetchAndStoreActiveOrders() {
+  const method = 'GET';
+  const requestPath = '/api/v5/finance/staking-defi/orders-active';
+  const timestamp = new Date().toISOString();
+  const url         = 'https://www.okx.com' + requestPath;
+
+  const headers = {
+    'OK-ACCESS-KEY':        process.env.OKX_API_KEY,
+    'OK-ACCESS-SIGN':       getSignature(timestamp, method, requestPath),
+    'OK-ACCESS-TIMESTAMP':  timestamp,
+    'OK-ACCESS-PASSPHRASE': process.env.OKX_PASSPHRASE,
+    'Content-Type': 'application/json'
+  };
+
+  try {
+    const  response  = await axios.get(url, { headers });
+    const orders = response.data.data;
+
+    for (const order of orders) {
+      const {
+        ordId, ccy, productId, state, protocol, protocolType, term, apy,
+        purchasedTime, estSettlementTime, cancelRedemptionDeadline, tag,
+        investData = [], earningData = [], fastRedemptionData = []
+      } = order;
+
+      const invest = investData[0] || {};
+      const earn = earningData[0] || {};
+      const fast = fastRedemptionData[0] || {};
+
+      const purchasedDatetime = convertToDatetime(purchasedTime);
+      const estSettleDatetime = convertToDatetime(estSettlementTime);
+      const cancelDeadlineDatetime = convertToDatetime(cancelRedemptionDeadline);
+
+      await pool.execute(
+        `INSERT INTO active_staking_orders (
+          ordId, ccy, productId, state, protocol, protocolType, term, apy,
+          investCcy, investAmt, earningCcy, earningType, earnings,
+          fastRedeemCcy, fastRedeemAmt,
+          purchasedTime, estSettlementTime, cancelRedemptionDeadline, tag
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE
+          state = VALUES(state),
+          earnings = VALUES(earnings),
+          earningType = VALUES(earningType),
+          fastRedeemAmt = VALUES(fastRedeemAmt),
+          cancelRedemptionDeadline = VALUES(cancelRedemptionDeadline)`,
+        [
+          ordId, ccy, productId, state, protocol, protocolType, term, apy,
+          invest.ccy || null, invest.amt || null,
+          earn.ccy || null, earn.earningType || null, earn.earnings || null,
+          fast.ccy || null, fast.redeemingAmt || null,
+          purchasedDatetime, estSettleDatetime, cancelDeadlineDatetime, tag
+        ]
+      );
+    }
+
+    console.log('✅ Dữ liệu đơn staking đang hoạt động đã được lưu vào MySQL');
+    
+  } catch (error) {
+    console.error('❌ Lỗi xử lý:', error.response?.data || error.message);
+  }
+}
+
+// fetchAndStoreActiveOrders();
+
+
+
+
+
+
+
+
+
+const MS_IN_HOUR = 24 * 60 * 60 * 1000;
+const START_DATE = new Date(Date.now() - (60 * 60 * 1000)); //'2025-06-01T00:00:00Z'
+console.log(START_DATE.toLocaleString());
+
+
+// const symbols = ['XAUT-USDT'];
+
+async function fetchHistoricalKline(symbol, startDate = START_DATE ) {
+  try {
+    let startTs = new Date(startDate).getTime();
+    const nowTs = Date.now();
+
+    while (startTs <= nowTs) {
+      const url = `https://www.okx.com/api/v5/market/candles` +
+                  `?instId=${symbol}` +
+                  `&bar=1D` +
+                  `&before=${startTs}` + // đổi before thành after sẽ lấy thời gian trước đó
+                  `&limit=100`;
+      const res = await axios.get(url);
+      const data = res.data.data;
+      
+      if (!data.length) break;
+
+      for (let candle of data) {
+        const [ts, o, h, l, c, vol] = candle;
+        const timestamp = new Date(parseInt(ts));
+        
+        await pool.execute(
+          `INSERT INTO okx_kline (symbol, timestamp, open, high, low, close, volume)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [symbol, timestamp, o, h, l, c, vol]
+        );
+      }
+
+      console.log(`✅ Đã lưu ${data.length} nến cho ${symbol} từ ${new Date().toISOString()}`);
+
+      startTs += MS_IN_HOUR * data.length;
+    }
+
+  } catch (err) {
+    console.error(`❌ Lỗi lấy lịch sử nến ${symbol}:`, err.message);
+  }
+}
+cron.schedule('0 0 * * *', () => {
+  console.log();
+  console.log('🕛 Daily fetch start:', new Date().toLocaleString());
+
+  (async () => {
+    for (let sym of symbols) {
+      try {
+        await fetchHistoricalKline(sym);
+        console.log(`✔️ ${sym}`);
+      } catch (e) {
+        console.error(`❌ ${sym} error:`, e);
+      }
+    }
+  })();
+
+}, { tz: 'Asia/Ho_Chi_Minh' });
+
+
+
+async function fetchHistoricalKline_hour(symbol, startDate = START_DATE ) {
+  try {
+    let startTs = new Date(startDate).getTime();
+    const nowTs = Date.now();
+
+    while (startTs <= nowTs) {
+      const url = `https://www.okx.com/api/v5/market/candles` +
+                  `?instId=${symbol}` +
+                  `&bar=1H` +
+                  `&before=${startTs}` + // đổi before thành after sẽ lấy thời gian trước đó
+                  `&limit=100`;
+      const res = await axios.get(url);
+      const data = res.data.data;
+      
+      if (!data.length) break;
+
+      for (let candle of data) {
+        const [ts, o, h, l, c, vol] = candle;
+        const timestamp = new Date(parseInt(ts));
+        
+        await pool.execute(
+          `INSERT IGNORE INTO okx_kline_hour (symbol, timestamp, open, high, low, close, volume)
+           VALUES (?, ?, ?, ?, ?, ?, ?)
+           ON DUPLICATE KEY UPDATE 
+           symbol = VALUES(symbol), 
+           timestamp = VALUES(timestamp),
+           volume = VALUES(volume)
+           `,
+          [symbol, timestamp, o, h, l, c, vol]
+        );
+      }
+
+      console.log(`✅ Đã lưu ${data.length} nến cho ${symbol} từ ${new Date().toISOString()}`);
+
+      startTs += MS_IN_HOUR * data.length;
+    }
+
+  } catch (err) {
+    console.error(`❌ Lỗi lấy lịch sử nến ${symbol}:`, err.message);
+  }
+}
+cron.schedule('07 * * * *', () => {
+  console.log();
+  console.log('🕛 Daily fetch start:', new Date().toLocaleString());
+
+  (async () => {
+    for (let sym of symbols) {
+      try {
+        await fetchHistoricalKline_hour(sym);
+        console.log(`✔️ ${sym}`);
+      } catch (e) {
+        console.error(`❌ ${sym} error:`, e);
+      }
+    }
+  })();
+
+}, { tz: 'Asia/Ho_Chi_Minh' });
+
+
+
+// Select DAY 
+async function fetchHistoricalKline_selected(symbol) {
+  const windowStart = new Date('2025-09-01T00:00:00Z').getTime();
+  const windowEnd   = new Date('2025-09-11T00:00:00Z').getTime();
+  console.log(formatDateTime(windowStart), formatDateTime(windowEnd));
+
+  let cursor = windowStart;
+
+  while (cursor < windowEnd) {
+    await delay(300);
+
+    const params = new URLSearchParams({
+      instId:   symbol,
+      bar:      '1D', 
+      before:   String(cursor),
+      after:    String(windowEnd),
+      limit:    '10'
+    });
+
+    const url = `https://www.okx.com/api/v5/market/candles?${params}`;
+    const resp = await axios.get(url);
+    const { code, data } = resp.data;
+
+    if (code !== '0') {
+      throw new Error(`OKX API error: ${resp.data.msg || code}`);
+    }
+
+    if (!data.length) {
+      console.log(`❌ Không có dữ liệu cho ${symbol} tại ${formatDateTime(cursor)}`);
+      break;
+    }
+
+    const values = data.map(r => {
+    const utcTime = new Date(Number(r[0]));
+    if (isNaN(utcTime.getTime())) {
+      console.warn(`⚠️ Bỏ qua dòng có timestamp lỗi: ${r[0]}`);
+      return null;
+    }
+
+    // Chuyển sang giờ Việt Nam (GMT+7)
+    const localTime = new Date(utcTime.getTime() + 7 * 60 * 60 * 1000);
+
+    return [
+      symbol,
+      localTime.toISOString().slice(0, 19).replace('T', ' '), // Định dạng chuẩn cho MySQL DATETIME
+      Number(r[1]),
+      Number(r[2]),
+      Number(r[3]),
+      Number(r[4]),
+      Number(r[5])
+    ];
+  }).filter(Boolean); // Loại bỏ các dòng null
+
+    const placeholders = values.map(() => '(?,?,?,?,?,?,?)').join(',');
+    const sql = `
+      INSERT INTO okx_kline (symbol, timestamp, open, high, low, close, volume)
+      VALUES ${placeholders}
+      ON DUPLICATE KEY UPDATE 
+        open = VALUES(open),
+        high = VALUES(high),
+        low = VALUES(low),
+        close = VALUES(close),
+        volume = VALUES(volume)
+    `;
+
+    const [result] = await pool.execute(sql, values.flat());
+
+    cursor = new Date(data[data.length - 1][0]).getTime() + (60 * 60 * 1000); // tăng 1h
+
+    console.log(`✅ ${symbol} - Insert thành công ${data.length} dòng tại ${formatDateTime(cursor)}`);
+    console.log(result.insertId);
+    cursor += 24 * 60 * 60 * 1000; // Tăng 1 ngày
+  }
+}
+
+// Chạy tuần tự hoặc song song tuỳ theo bạn
+// (async () => {
+//   for (let symbol of symbols) {
+//     await fetchHistoricalKline_selected(symbol);
+//     console.log(`✔️ Done ${symbol}`);
+//   }
+// })();
+
+// Select HOUR 
+async function fetchHistoricalKline_selected_hour(symbol) {
+  const windowStart = new Date('2025-09-01T00:00:00Z').getTime();
+  const windowEnd   = new Date('2025-09-11T00:00:00Z').getTime();
+  console.log(formatDateTime(windowStart), formatDateTime(windowEnd));
+
+  let cursor = windowStart;
+
+  while (cursor < windowEnd) {
+    await delay(300);
+
+    const params = new URLSearchParams({
+      instId:   symbol,
+      bar:      '1H', 
+      before:   String(cursor),
+      after:    String(windowEnd),
+      limit:    '100'
+    });
+
+    const url = `https://www.okx.com/api/v5/market/candles?${params}`;
+    const resp = await axios.get(url);
+    const { code, data } = resp.data;
+
+    if (code !== '0') {
+      throw new Error(`OKX API error: ${resp.data.msg || code}`);
+    }
+
+    if (!data.length) {
+      console.log(`❌ Không có dữ liệu cho ${symbol} tại ${formatDateTime(cursor)}`);
+      break;
+    }
+
+    const values = data.map(r => {
+    const utcTime = new Date(Number(r[0]));
+    if (isNaN(utcTime.getTime())) {
+      console.warn(`⚠️ Bỏ qua dòng có timestamp lỗi: ${r[0]}`);
+      return null;
+    }
+
+    // Chuyển sang giờ Việt Nam (GMT+7)
+    const localTime = new Date(utcTime.getTime() + 7 * 60 * 60 * 1000);
+
+    return [
+      symbol,
+      localTime.toISOString().slice(0, 19).replace('T', ' '), // Định dạng chuẩn cho MySQL DATETIME
+      Number(r[1]),
+      Number(r[2]),
+      Number(r[3]),
+      Number(r[4]),
+      Number(r[5])
+    ];
+  }).filter(Boolean); // Loại bỏ các dòng null
+
+    const placeholders = values.map(() => '(?,?,?,?,?,?,?)').join(',');
+    const sql = `
+      INSERT INTO okx_kline_hour (symbol, timestamp, open, high, low, close, volume)
+      VALUES ${placeholders}
+      ON DUPLICATE KEY UPDATE 
+        open = VALUES(open),
+        high = VALUES(high),
+        low = VALUES(low),
+        close = VALUES(close),
+        volume = VALUES(volume)
+    `;
+
+    const [result] = await pool.execute(sql, values.flat());
+
+    cursor = new Date(data[data.length - 1][0]).getTime() + (60 * 60 * 1000); // tăng 1h
+
+    console.log(`✅ ${symbol} - Insert thành công ${data.length} dòng tại ${formatDateTime(cursor)}`);
+    console.log(result.insertId);
+    // cursor += 100 * 60 * 60 * 1000; // Tăng 1 ngày
+  }
+}
+
+// Chạy tuần tự hoặc song song tuỳ theo bạn
+// (async () => {
+//   for (let symbol of symbols) {
+//     await fetchHistoricalKline_selected_hour(symbol);
+//     console.log(`✔️ Done ${symbol}`);
+//   }
+// })();
+
+
+
+async function getLastSavedTs(ccy) {
+  // Trả về giá trị ms kể từ epoch của ts lớn nhất đã lưu; nếu chưa có, trả về 0
+  const [rows] = await pool.execute(
+    `SELECT COALESCE(MAX(UNIX_TIMESTAMP(ts) * 1000), 0) AS lastTs
+     FROM lending_history
+     WHERE ccy = ?`,
+    [ccy]
+  );
+
+  return rows[0].lastTs;
+}
+
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// Lấy lịch sử simple earn
+async function fetchAndStoreLendingHistory(ccy) {
+  try {
+    const startDate = new Date(Date.now() - (60 * 60 * 1000));
+    let start = startDate.getTime();
+
+    const nowTs  = Date.now(); 
+    // const nowTs  = new Date(Date.now() - (7 * 24 * 60 * 60 * 1000)) 
+
+    while (start < nowTs) {
+      await delay(200); // 0. Chèn delay 200ms trước khi gọi API để tránh rate-limit
+      const params = new URLSearchParams({
+        ccy,
+        after: String(nowTs), // dữ liệu cũ hơn so với API column ts
+        before: String(start), // dữ liệu mới nhất so với API
+        limit: '100'
+      });
+      const path       = `/api/v5/finance/savings/lending-history?${params}`;
+      const { code, data }  = await okxRequest('GET', path);
+      if (code !== '0') {
+        throw new Error(`OKX API error: ${code}`);
+      }
+      if (!data.length) {
+        console.log(`No new records for ${ccy}`);
+        break;
+      }
+
+      // Lấy ts mới nhất từ MySQL trước đó
+      const lastSavedTs = await getLastSavedTs(ccy);
+
+      // Lọc ra những record thực sự mới hơn
+      const newData = data.filter(r => Number(r.ts) > lastSavedTs);
+
+      if (!newData.length) {
+        console.log(`No new records for ${ccy} since ts ${new Date(lastSavedTs).toISOString()}`);
+        break;
+      }
+
+      // 3) Chuẩn bị batch parameters và thực thi 1 câu SQL duy nhất
+      const values = newData.map(r => [
+        r.ccy,
+        Number(r.amt),
+        Number(r.earnings),
+        Number(r.rate),
+        new Date(Number(r.ts))
+      ]);
+      const placeholders = values.map(() => '(?,?,?,?,?)').join(',');
+      const sql = `
+        INSERT INTO lending_history
+          (ccy, amt, earnings, rate, ts)
+        VALUES ${placeholders}
+        ON DUPLICATE KEY UPDATE earnings = VALUES(earnings)
+      `;
+      await pool.execute(sql, values.flat());
+
+      console.log(`✅ Saved ${newData.length} records for ${ccy} -- Simple Earn -- since ${new Date(start).toISOString()}`);
+
+      // 4) Cập nhật afterTs bằng timestamp lớn nhất + 1ms
+      const maxTs = Math.max(...newData.map(r => Number(r.ts)));
+      start = maxTs + 1;
+    }
+  } catch (err) {
+    console.error(`❌ Error fetching lending-history for ${ccy}:`, err.message);
+  }
+}
+
+cron.schedule('05 * * * *', () => {
+  (async () => {
+    for (const ccy of ccys) {
+      try {
+        await fetchAndStoreLendingHistory(ccy);
+        console.log(`🎉Simple Earning: ${ccy} complete`);
+      } catch (e) {
+        console.error(`❌ ${ccy} error:`, e);
+      }
+    }
+  })();
+
+}, { tz: 'Asia/Ho_Chi_Minh' });
+
+
+
+async function fetchAndStoreLendingHistory_backup(ccy) {
+  try {
+    const startDate = new Date(Date.now() - (60 * 60 * 1000));
+    let start = startDate.getTime();
+
+    const nowTs  = Date.now(); 
+    // const nowTs  = new Date(Date.now() - (7 * 24 * 60 * 60 * 1000)) 
+
+    while (start < nowTs) {
+      await delay(200); // 0. Chèn delay 200ms trước khi gọi API để tránh rate-limit
+      const params = new URLSearchParams({
+        ccy,
+        after: String(nowTs), // dữ liệu cũ hơn so với API column ts
+        before: String(start), // dữ liệu mới nhất so với API
+        limit: '100'
+      });
+      const path       = `/api/v5/finance/savings/lending-history?${params}`;
+      const timestamp  = new Date().toISOString();
+      const signature  = getSignature(timestamp, 'GET', path);
+      const url        = `https://www.okx.com${path}`;
+
+      // 2) Gọi OKX API
+      const resp = await axios.get(url, {
+        headers: {
+          'OK-ACCESS-KEY':        process.env.OKX_API_KEY,
+          'OK-ACCESS-SIGN':       signature,
+          'OK-ACCESS-TIMESTAMP':  timestamp,
+          'OK-ACCESS-PASSPHRASE': process.env.OKX_PASSPHRASE
+        }
+      });
+
+      const { code, data } = resp.data;
+      if (code !== '0') {
+        throw new Error(`OKX API error: ${resp.data.msg || code}`);
+      }
+      if (!data.length) {
+        console.log(`No new records for ${ccy}`);
+        break;
+      }
+
+      // Lấy ts mới nhất từ MySQL trước đó
+      const lastSavedTs = await getLastSavedTs(ccy);
+
+      // Lọc ra những record thực sự mới hơn
+      const newData = data.filter(r => Number(r.ts) > lastSavedTs);
+
+      if (!newData.length) {
+        console.log(`No new records for ${ccy} since ts ${new Date(lastSavedTs).toISOString()}`);
+        break;
+      }
+
+      // 3) Chuẩn bị batch parameters và thực thi 1 câu SQL duy nhất
+      const values = newData.map(r => [
+        r.ccy,
+        Number(r.amt),
+        Number(r.earnings),
+        Number(r.rate),
+        new Date(Number(r.ts))
+      ]);
+      const placeholders = values.map(() => '(?,?,?,?,?)').join(',');
+      const sql = `
+        INSERT INTO lending_history
+          (ccy, amt, earnings, rate, ts)
+        VALUES ${placeholders}
+        ON DUPLICATE KEY UPDATE earnings = VALUES(earnings)
+      `;
+      await pool.execute(sql, values.flat());
+
+      console.log(`✅ Saved ${newData.length} records for ${ccy} -- Simple Earn -- since ${new Date(start).toISOString()}`);
+
+      // 4) Cập nhật afterTs bằng timestamp lớn nhất + 1ms
+      const maxTs = Math.max(...newData.map(r => Number(r.ts)));
+      start = maxTs + 1;
+    }
+  } catch (err) {
+    console.error(`❌ Error fetching lending-history for ${ccy}:`, err.message);
+  }
+}
+
+
+// // Chạy đồng loạt khi service khởi động;
+// (async () => {
+//   for (let ccy of ccys) {
+//     await fetchAndStoreLendingHistory(ccy);
+//     console.log(`✔️ Done ${ccy}`);
+//   }
+// })();
+
+
+async function fetchAndStoreLendingHistory_selected2(ccy) {
+  const windowStart = new Date('2025-09-10 00:00:00').getTime();
+  const windowEnd   = new Date('2025-09-11 08:00:00').getTime();
+
+  // after=timestamp: Yêu cầu API trả về các bản ghi cũ hơn (xảy ra trước) timestamp này.
+  // before=timestamp: Yêu cầu API trả về các bản ghi mới hơn (xảy ra sau) timestamp này.
+
+  let cursor        = windowStart;
+
+  while (cursor < windowEnd) {
+    await delay(300); 
+
+    const params = new URLSearchParams({
+      ccy,
+      before:   String(cursor),
+      after:    String(windowEnd),
+      limit:    '100'
+    });
+    const path      = `/api/v5/finance/savings/lending-history?${params}`;
+    const timestamp = new Date().toISOString();
+    const signature = getSignature(timestamp, 'GET', path);
+    const url       = `https://www.okx.com${path}`;
+
+    const resp = await axios.get(url, {
+      headers: {
+        'OK-ACCESS-KEY':        process.env.OKX_API_KEY,
+        'OK-ACCESS-SIGN':       signature,
+        'OK-ACCESS-TIMESTAMP':  timestamp,
+        'OK-ACCESS-PASSPHRASE': process.env.OKX_PASSPHRASE
+      }
+    });
+
+    const { code, data } = resp.data;
+    if (code !== '0') {
+      throw new Error(`OKX API error: ${resp.data.msg || code}`);
+    }
+    if (!data.length) {
+      console.log(`Không có dữ liệu của đồng: ${ccy}`);
+      break;
+    }
+
+    // Chuẩn bị batch INSERT ... ON DUPLICATE KEY UPDATE
+    const values = data.map(r => [
+      r.ccy,
+      Number(r.amt),
+      Number(r.earnings),
+      Number(r.rate),
+      new Date(Number(r.ts))
+    ]);
+    const placeholders = values.map(() => '(?,?,?,?,?)').join(',');
+    const sql = `
+      INSERT INTO lending_history
+        (ccy, amt, earnings, rate, ts)
+      VALUES ${placeholders}
+      ON DUPLICATE KEY UPDATE earnings = VALUES(earnings)
+    `;
+    const [result] = await pool.execute(sql, values.flat());    
+
+    // vòng lặp tiếp theo sẽ đc gắn bởi cursor + 1h
+    cursor = cursor + (60*60*1000); //tăng 1h
+
+    console.log(
+      `✅ ${ccy} insert Thành công ID: ${result.insertId} - : Có ${data.length} dòng dữ liệu,  được tìm thấy (cursor) tại khung thời gian: ${formatDateTime(cursor)}`
+    );
+  }
+} 
+
+// Chạy tuần tự hoặc song song tuỳ theo bạn
+// (async () => {
+//   for (let ccy of ccys) {
+//     await fetchAndStoreLendingHistory_selected2(ccy);
+//     console.log(`✔️ Done ${ccy}`);
+//   }
+// })();
+
+
+// Chạy song song các ccys cùng lúc và đợi function chạy xong thì console.log
+// setTimeout(async () => {
+//   console.log(`🚀 ${yellow('fetchAndStoreLendingHistory_selected2')} - Chương trình rà soát và lưu dữ liệu theo thời gian đang được thực thi, thông chi tiết như sau: `);
+//   await Promise.all(ccys.map(ccy => fetchAndStoreLendingHistory_selected2(ccy)));
+//   console.log(`✔️ Done `);
+// }, 50);
+
+
+// Chạy MỘT ccy xong console.log
+// (async () => {
+//   await fetchAndStoreLendingHistory_selected2(a='BERA');
+//   console.log(`✔️ Đã refill dữ liệu ${a} thành công`);
+// })();
+
+
+
+const crypts = ['BERA', 'PARTI', 'KAITO'];
+
+async function insertAverageSimpleEarn(crypt) {
+  const sql = `
+    INSERT INTO average_simple_earn (ccy, amt, rate, earn, sum_earm)
+    SELECT
+      ccy,
+      ROUND(AVG(amt), 2)        AS amt,
+      ROUND(AVG(rate) * 100, 2) AS rate,
+      ROUND(AVG(earnings), 3)   AS earn,
+      ROUND(SUM(earnings), 3)   AS sum_earm
+    FROM lending_history
+    WHERE ccy = ?
+      AND ts >= CONCAT(DATE_SUB(CURDATE(), INTERVAL 1 DAY), ' 23:00:00')
+      AND ts <  CONCAT(CURDATE(),                 ' 23:00:00')
+    GROUP BY ccy;
+  `;
+
+  try {
+    await pool.execute(sql, [crypt]);
+    console.log(`✅ [${crypt}] Đã lưu average simple earn thành công`);
+  } catch (err) {
+    console.error(`❌ [${crypt}] Lỗi insertAverageSimpleEarn:`, err.message);
+  }
+}
+
+// Lên lịch chạy vào 23:00 hằng ngày (Asia/Ho_Chi_Minh)
+cron.schedule('01 23 * * *',
+  async () => {
+    console.log('🕛 Daily insert start:', new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' }));
+    for (let crypt of crypts) {
+      await insertAverageSimpleEarn(crypt);
+    }
+  },
+  { timezone: 'Asia/Ho_Chi_Minh' }
+);
+
+
+
+async function insertSimpleEarn(crypt) {
+  const sql = `
+    WITH
+      days AS (
+        SELECT DATE_FORMAT(ts, '%Y/%m/%d') AS day
+        FROM lending_history
+        WHERE ccy = ?
+        GROUP BY DATE_FORMAT(ts, '%Y/%m/%d')
+      ),
+      hours AS (
+        SELECT 0 AS hour UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL
+        SELECT 3 UNION ALL SELECT 4 UNION ALL SELECT 5 UNION ALL
+        SELECT 6 UNION ALL SELECT 7 UNION ALL SELECT 8 UNION ALL
+        SELECT 9 UNION ALL SELECT 10 UNION ALL SELECT 11 UNION ALL
+        SELECT 12 UNION ALL SELECT 13 UNION ALL SELECT 14 UNION ALL
+        SELECT 15 UNION ALL SELECT 16 UNION ALL SELECT 17 UNION ALL
+        SELECT 18 UNION ALL SELECT 19 UNION ALL SELECT 20 UNION ALL
+        SELECT 21 UNION ALL SELECT 22 UNION ALL SELECT 23
+      ),
+      core AS (
+        SELECT
+          id,
+          ccy,
+          ts,
+          DATE_FORMAT(ts, '%Y/%m/%d') AS day,
+          CAST(DATE_FORMAT(ts, '%H') AS UNSIGNED) AS hour,
+          amt AS amt,
+          LEAST(rate * 100, 99.99999999) AS rate,
+          earnings
+        FROM lending_history
+        WHERE ccy = ?
+      ),
+      full_grid AS (
+        SELECT
+          core.id,
+          COALESCE(core.ccy, ?) AS ccy,
+          core.ts,
+          days.day,
+          hours.hour,
+          core.amt,
+          core.rate,
+          core.earnings
+        FROM days
+        CROSS JOIN hours
+        LEFT JOIN core ON core.day = days.day AND core.hour = hours.hour
+      ),
+      first_day AS (
+        SELECT MIN(STR_TO_DATE(day, '%Y/%m/%d')) AS dt FROM days
+      ),
+      first_hour AS (
+        SELECT MIN(hour) AS hr
+        FROM core
+        JOIN first_day ON DATE_FORMAT(first_day.dt, '%Y/%m/%d') = core.day
+      )
+    SELECT
+      id,
+      ccy,
+      ts,
+      day,
+      LPAD(hour, 2, '0') AS hour,
+      COALESCE(amt, 0),
+      COALESCE(rate, 0),
+      COALESCE(earnings, 0),
+      CASE WHEN amt IS NULL THEN 'MISSING' ELSE 'OK' END AS status
+    FROM full_grid
+    CROSS JOIN first_day
+    CROSS JOIN first_hour
+    WHERE
+      (
+        STR_TO_DATE(day, '%Y/%m/%d') < CURDATE()
+        OR (
+          STR_TO_DATE(day, '%Y/%m/%d') = CURDATE()
+          AND hour <= HOUR(NOW())
+        )
+      )
+      AND NOT (
+        STR_TO_DATE(day, '%Y/%m/%d') = first_day.dt
+        AND hour < first_hour.hr
+      )
+    ORDER BY STR_TO_DATE(day, '%Y/%m/%d') DESC, hour DESC 
+    LIMIT 1
+  `;
+
+  try {
+    const [rows] = await pool.execute(sql, [crypt, crypt, crypt]);
     if (rows.length === 0) {
-      return res.status(401).json({ success: false, message: 'Đăng nhập không thành công. Vui lòng kiểm tra lại thông tin đăng nhập.' });
+      console.warn(`⚠️ [${crypt}] Không có dữ liệu để insert`);
+      return;
     }
 
-    const user = rows[0];
-    
-    if (!user || !user.password) {
-      return res.status(400).json({ success: false, message: 'Lỗi cấu trúc dữ liệu người dùng.' });
-    }
-
-    const isPasswordMatch = await bcrypt.compare(password, user.password);
-
-    if (isPasswordMatch) {
-      req.session.user = user;
-      const userlogin = req.session.user.user_name;
-      console.log("Người dùng: " + userlogin + " đã đăng nhập");
-      return res.status(200).json({ success: true, message: 'Đăng nhập thành công' });
-    } else {
-      return res.status(401).json({ success: false, message: 'Đăng nhập không thành công. Hãy kiểm tra thông tin.' });
-    }
-  } catch (error) {
-    console.error(error);
-    return res.status(500).json({ success: false, message: 'Đã xảy ra lỗi khi xử lý đăng nhập.' });
-  }
-});
-
-app.post('/login', async function(req, res) {
-  const { user_name, password } = req.body;
-
-  try {// Tìm người dùng trong cơ sở dữ liệu
-  const rows = await query('SELECT * FROM admin_user WHERE user_name = ?', [user_name]);
-
-  if (rows.length === 0) {
-      const errorMessage = 'Đăng nhập không thành công. Vui lòng kiểm tra lại thông tin đăng nhập.';
-      res.render('part/check-user', { errorMessage: errorMessage });
-  } else {
-      const user = rows[0];
-
-      if (!user || !user.password) {
-      const errorMessage = 'Lỗi cấu trúc dữ liệu người dùng.';
-      res.render('part/check-user', { errorMessage: errorMessage });
-      } else {
-      // So sánh mật khẩu đã mã hóa với mật khẩu nhập vào
-      const isPasswordMatch = await bcrypt.compare(password, user.password);
-
-      if (isPasswordMatch) {
-          // Lưu thông tin người dùng trong session
-          req.session.user = user;
-
-          const userlogin = req.session.user.user_name;
-          console.log("Người dùng: " + userlogin + " đã đăng nhập");
-
-          // Điều hướng người dùng sau khi đăng nhập thành công
-          res.redirect('/home');
-      } else {
-          const errorMessage = 'Đăng nhập không thành công, hãy kiểm tra thông tin.';
-          res.render('part/check-user', { errorMessage: errorMessage });
-      }
-      }
-  }
-  } catch (error) {
-  console.error(error);
-  }
-});
-
-app.get('/login', function(req, res) {// Kiểm tra xem người dùng đã đăng nhập hay chưa
-  const success = req.query.success;
-  const errorMessage = req.query.errorMessage;
-  
-  if (req.session.user) {        
-      return res.render('/welcome')};
-
-  res.render('part/check-user', { success, errorMessage });
-
-});
-app.get('/logout', function(req, res) {// Xóa thông tin người dùng khỏi session
-  const user = req.session.user.user_name;
-  console.log("Người dùng: " + user + " đã đăng xuất");
-  req.session.destroy();
-  res.redirect('/login');// Điều hướng người dùng sau khi đăng xuất thành công
-});
-
-app.get('/welcome', Login, async function(req, res) {
-  const obj = { print: null };
-  const user = req.session.user;
-  const id = req.session.user.user_id;
-  const jobId = req.query.jobId;
-
-  const resultMember = await executeQuery(`SELECT @rownum := @rownum + 1 AS stt, a.*,  
-                                                  DATE_FORMAT(a.date_add_member, '%d/%m/%Y') AS date_add_member_new, 
-                                                  DATE_FORMAT(a.date_report, '%d/%m/%Y') AS date_report_new
-                                                FROM (SELECT @rownum := 0) r, event_group a
-                                                WHERE a.status >= 0 
-                                                  AND a.user_id_member = ? order by a.date_add_member desc`, [id]);
-
-  if (resultMember && resultMember.length > 0) {
-    obj.printMem = resultMember;
-  }
-
-  const months = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"];
-  
-  let found = false;
-  
-  for (const month of months) {
-    const queryFind = `SELECT a.*, b.user_member, b.user_id_member
-                            from thang${month} a, event_group b 
-                            where a.id = b.event_id 
-                              and b.status = 1 
-                              and b.event_status = 1
-                              and a.status = 1 
-                              and b.event_id = ?
-                              and b.user_id_member = ?` // Remove quotes around '?'
-                              
-    const resultFind = await executeQuery(queryFind, [jobId, id]);
-
-    if (resultFind && resultFind.length > 0) {
-      obj.printFind = resultFind;
-      found = true;
-      break;
-    }
-  }
-
-  if (found) {
-    res.render('welcome', { user: user, obj: obj, jobId: jobId });
-  } else {
-    const errorMessage = 'Không tìm thấy dữ liệu';
-    res.render('welcome', { errorMessage: errorMessage, user: user, obj: obj, jobId: jobId });
-  }
-});
-
-app.post('/find', Login, async(req, res) => {
-  const obj = { print: null };
-  const user = req.session.user;
-  const id = req.session.user.user_id;
-  const jobId = req.body.jobId;
-
-  const resultMember = await executeQuery(`SELECT @rownum := @rownum + 1 AS stt, a.*,  
-                                                  DATE_FORMAT(a.date_add_member, '%d/%m/%Y') AS date_add_member_new, 
-                                                  DATE_FORMAT(a.date_report, '%d/%m/%Y') AS date_report_new
-                                                FROM (SELECT @rownum := 0) r, event_group a
-                                                WHERE a.status >= 0 
-                                                  AND a.user_id_member = ? order by a.date_add_member desc`, [id]);
-
-  if (resultMember && resultMember.length > 0) {
-    obj.printMem = resultMember;
-  }
-
-  const months = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"];
-  
-  let found = false;
-  
-  for (const month of months) {
-    const queryFind = `SELECT a.*, b.user_member, b.user_id_member
-                            from thang${month} a, event_group b 
-                            where a.id = b.event_id 
-                              and b.status = 1 
-                              and b.event_status = 1
-                              and a.status = 1 
-                              and b.event_id = ?
-                              and b.user_id_member = ?` // Remove quotes around '?'
-                              
-    const resultFind = await executeQuery(queryFind, [jobId, id]);
-
-    if (resultFind && resultFind.length > 0) {
-      obj.printFind = resultFind;
-      found = true;
-      break;
-    }
-  }
-
-  if (found) {
-    res.render('welcome', { user: user, obj: obj, jobId: jobId });
-  } else {
-    const errorMessage = 'Không tìm thấy dữ liệu';
-    res.render('welcome', { errorMessage: errorMessage, user: user, obj: obj, jobId: jobId });
-  }
-});
-
-app.get('/change-password', Login, function(req, res) {// Kiểm tra xem người dùng đã đăng nhập hay chưa
-  res.render('part/user-change-password')
-});
-
-app.post('/change-password', Login, async function(req, res) {
-  const userID_changePass = req.session.user.user_id;
-  const { currentPassword, newPassword } = req.body;
-
-  try {
-    // Kiểm tra xem user_id tồn tại trong cơ sở dữ liệu hay không
-    const [results] = await connection.promise().query('SELECT * FROM admin_user WHERE user_id = ?', [userID_changePass]);
-
-    if (results.length === 0) {
-      res.status(404).json({ message: 'User not found' });
-    } else {
-      // So sánh mật khẩu hiện tại với mật khẩu trong cơ sở dữ liệu
-      const user = results[0];
-      const isMatch = await bcrypt.compare(currentPassword, user.password);
-
-      if (!isMatch) {
-        const message = 'Mật khẩu hiện tại không đúng.';
-        res.render('part/user-change-password', { message: message });
-      } else {
-        // Mã hóa mật khẩu mới
-        const hashedPassword = await bcrypt.hash(newPassword, 10);
-
-        // Cập nhật mật khẩu mới vào cơ sở dữ liệu
-        await connection.promise().query('UPDATE admin_user SET password = ? WHERE user_id = ?', [hashedPassword, userID_changePass]);
-
-        const message = 'Thay đổi mật khẩu thành công.';
-        req.session.destroy(function(err) {
-          if (err) {
-            console.error(err);
-          }
-          res.redirect('/login?success=true'); // Chỉ cần truyền đường dẫn "/login" vào hàm redirect
-        });
-      }
-    }
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: 'Internal server error' });
-  }
-});
-
-function requireLogin(req, res, next) {// Function gắn vào middleware cho các route cần kiểm tra đăng nhập
-  if (!req.session.user) {
-    return res.redirect('/login');
-  }
-  if (req.session.user.status !== 1) {
-    console.log(req.session.user.status);
-    return res.render('part/0-access-decline');
-  }
-  req.user = req.session.user;
-  next();
-}
-
-async function notExist(req, res, next) {
-  const id = req.params.id;
-  const user_id_perform = req.session.user.user_id;
-  const months = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"];
-  
-  let found = false; // Biến cờ để kiểm tra xem có kết quả hợp lệ trong vòng lặp hay không
-  
-  for (const month of months) {
-    const queryMonth = `select  a.*, b.user_id_member 
-                        from thang${month} a, event_group b 
-                        where a.id = b.event_id 
-                          and b.status = 1 
-                          and a.status = 1 
-                          and a.id = ?
-                          and b.user_id_member in (?)`;
-    const resultMonth = await executeQuery(queryMonth, [id, user_id_perform]);
-
-    if (resultMonth && resultMonth.length > 0) {
-      found = true;
-      break; // Tìm thấy kết quả hợp lệ, thoát khỏi vòng lặp
-    } else {
-      // console.log(id, user_id_perform, resultMonth.length, month, months);
-    }
-  }
-
-  if (found) {
-    next(); // Tiếp tục xử lý
-  } else {
-    res.render('part/0-access-decline'); // Trả về thông báo lỗi
-  }
-}
-
-async function notEdit(req, res, next) {
-  const id = req.params.id;
-  const user_id_perform = req.session.user.user_id;
-  const months = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"];
-  
-  let found2 = false;
-
-  for (const month of months) {
-    const queryNotEdit = `select  * from thang${month} 
-                          where status = 1 
-                            and id = ?
-                            and user_id_create = (?)`;
-    const NotEdit = await executeQuery(queryNotEdit, [id, user_id_perform]);
-
-    if (NotEdit && NotEdit.length > 0) {
-      found2 = true;
-      break; // Tìm thấy kết quả hợp lệ, thoát khỏi vòng lặp
-    } else {
-      // console.log(id, user_id_perform, resultMonth.length, month, months);
-    }
-  }
-
-  if (found2) {
-    next(); // Tiếp tục xử lý
-  } else {
-    res.render('part/0-access-decline'); // Trả về thông báo lỗi
-  }
-}
-
-async function notEditWorkGranted(req, res, next) {
-  const eg_id = req.params.eg_id;
-  const user_id_perform = req.session.user.user_id;
-  const months = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"];
-  
-  let found3 = false;
-
-  for (const month of months) {
-    const queryNotEdit = `select  a.*, b.event_member_id
-                            from thang${month} a, event_group b 
-                            where a.id = b.event_id 
-                              and b.status = 1 
-                              and a.status = 1 
-                              and b.event_member_id = ?
-                              and a.user_id_create = ?`;
-    const NotEdit = await executeQuery(queryNotEdit, [eg_id, user_id_perform]);
-
-    if (NotEdit && NotEdit.length > 0) {
-      found3 = true;
-      break; // Tìm thấy kết quả hợp lệ, thoát khỏi vòng lặp
-    } else {
-      // console.log(id, user_id_perform, resultMonth.length, month, months);
-    }
-  }
-
-  if (found3) {
-    next(); // Tiếp tục xử lý
-  } else {
-    res.render('part/0-access-decline'); // Trả về thông báo lỗi
-  }
-}
-
-async function notEditWorkreport(req, res, next) {
-  const eg_id = req.params.eg_id;
-  const user_id_perform = req.session.user.user_id;
-  const months = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"];
-  
-  let found3 = false;
-
-  for (const month of months) {
-    const queryNotEdit = `select  a.*, b.event_member_id
-                            from thang${month} a, event_group b 
-                            where a.id = b.event_id 
-                              and b.status = 1 
-                              and a.status = 1 
-                              and b.event_member_id = ?
-                              and b.user_id_member = ?`;
-    const NotEdit = await executeQuery(queryNotEdit, [eg_id, user_id_perform]);
-
-    if (NotEdit && NotEdit.length > 0) {
-      found3 = true;
-      break; // Tìm thấy kết quả hợp lệ, thoát khỏi vòng lặp
-    } else {
-      // console.log(id, user_id_perform, resultMonth.length, month, months);
-    }
-  }
-
-  if (found3) {
-    next(); // Tiếp tục xử lý
-  } else {
-    res.render('part/0-access-decline'); // Trả về thông báo lỗi
-  }
-}
-
-async function staticsCompleted(req, res, next) {
-  try {
-    const id = req.params.id;
-    const user_id_login = req.session.user.user_id;
-
-    
-    const basic_statics_Uncompleted = await executeQuery(`SELECT COUNT(mission_completed)
-                                                          FROM event_group
-                                                          WHERE event_id = ? AND mission_completed = 0 and status = 1`, [id]);
-
-    if (basic_statics_Uncompleted && basic_statics_Uncompleted.length > 0) {
-      req.basic_statics_Uncompleted = basic_statics_Uncompleted;
-    };
-
-    const basic_statics_percent = await executeQuery(`select (select count(mission_completed) count from event_group eg where event_id = ? and mission_completed > 0 and status = 1) / count(mission_completed)
-                                                      from event_group 
-                                                      where event_id = ? and status = 1;`, [id, id]); 
-
-    if (basic_statics_percent && basic_statics_percent.length > 0) {
-          const resultPercent = basic_statics_percent[0];
-          const value = parseFloat(Object.values(resultPercent)[0]);
-          const percentage = (value * 100).toFixed(0) + '%';
-          req.basic_statics_percent = percentage;
-          // Cách 2: const eventID = id;
-          // const result2 = basic_statics_percent[0][`(select count(mission_completed) count from event_group eg where event_id = '${eventID}' and mission_completed > 0 and status = 1) / count(mission_completed)`];
-          // console.log(result2);
-        };
-    
-    const basic_statics_selectApercent = await executeQuery(`SELECT (SELECT COUNT(mission_completed) count FROM event_group eg WHERE event_id = ? AND mission_completed = 2 AND status = 1) / COUNT(mission_completed)
-                                                        FROM event_group
-                                                        WHERE event_id = ? AND status = 1`, [id, id]);
-
-    if (basic_statics_selectApercent && basic_statics_selectApercent.length > 0) {
-      const resultPercentA = basic_statics_selectApercent[0];
-      const valueA = parseFloat(Object.values(resultPercentA)[0]);
-      const percentageA = (valueA * 100).toFixed(1) + '%';
-      req.basic_statics_selectApercent = percentageA;
-    };
-
-    const basic_statics_selectA = await executeQuery(`SELECT COUNT(mission_completed)
-                                                        FROM event_group
-                                                        WHERE event_id = ? AND mission_completed = 2 and status = 1`, [id]);
-
-    if (basic_statics_selectA && basic_statics_selectA.length > 0) {
-      req.basic_statics_selectA = basic_statics_selectA;
-    };
-
-    const basic_statics_selectBpercent = await executeQuery(`SELECT (SELECT COUNT(mission_completed) count FROM event_group eg WHERE event_id = ? AND mission_completed = 3 AND status = 1) / COUNT(mission_completed)
-                                                        FROM event_group
-                                                        WHERE event_id = ? AND status = 1`, [id, id]);
-
-    if (basic_statics_selectBpercent && basic_statics_selectBpercent.length > 0) {
-      const resultPercentB = basic_statics_selectBpercent[0];
-      const valueB = parseFloat(Object.values(resultPercentB)[0]);
-      const percentageB = (valueB * 100).toFixed(1) + '%';
-      req.basic_statics_selectBpercent = percentageB;
-    };
-
-    const basic_statics_selectB = await executeQuery(`SELECT COUNT(mission_completed)
-                                                        FROM event_group
-                                                        WHERE event_id = ? AND mission_completed = 3 and status = 1`, [id]);
-
-    if (basic_statics_selectB && basic_statics_selectB.length > 0) {
-      req.basic_statics_selectB = basic_statics_selectB;
-    };
-
-    const basic_statics_selectCpercent = await executeQuery(`SELECT (SELECT COUNT(mission_completed) count FROM event_group eg WHERE event_id = ? AND mission_completed = 4 AND status = 1) / COUNT(mission_completed)
-                                                        FROM event_group
-                                                        WHERE event_id = ? AND status = 1`, [id, id]);
-
-    if (basic_statics_selectCpercent && basic_statics_selectCpercent.length > 0) {
-      const resultPercentC = basic_statics_selectCpercent[0];
-      const valueC = parseFloat(Object.values(resultPercentC)[0]);
-      const percentageC = (valueC * 100).toFixed(1) + '%';
-      req.basic_statics_selectCpercent = percentageC;
-    };
-    
-    const basic_statics_selectC = await executeQuery(`SELECT COUNT(mission_completed)
-                                                        FROM event_group
-                                                        WHERE event_id = ? AND mission_completed = 4 and status = 1`, [id]);
-
-    if (basic_statics_selectC && basic_statics_selectC.length > 0) {
-      req.basic_statics_selectC = basic_statics_selectC;
-    };
-
-    const basic_statics_selectDpercent = await executeQuery(`SELECT (SELECT COUNT(mission_completed) count FROM event_group eg WHERE event_id = ? AND mission_completed = 5 AND status = 1) / COUNT(mission_completed)
-                                                        FROM event_group
-                                                        WHERE event_id = ? AND status = 1`, [id, id]);
-
-    if (basic_statics_selectDpercent && basic_statics_selectDpercent.length > 0) {
-      const resultPercentD = basic_statics_selectDpercent[0];
-      const valueD = parseFloat(Object.values(resultPercentD)[0]);
-      const percentageD = (valueD * 100).toFixed(1) + '%';
-      req.basic_statics_selectDpercent = percentageD;
-    };
-    
-    const basic_statics_selectD = await executeQuery(`SELECT COUNT(mission_completed)
-                                                        FROM event_group
-                                                        WHERE event_id = ? AND mission_completed = 5 and status = 1`, [id]);
-
-    if (basic_statics_selectD && basic_statics_selectD.length > 0) {
-      req.basic_statics_selectD = basic_statics_selectD;
-    };
-
-    const basic_statics_completed = await executeQuery(`SELECT COUNT(mission_completed)
-                                                        FROM event_group
-                                                        WHERE event_id = ? AND mission_completed > 0 and status = 1`, [id]);
-
-    if (basic_statics_completed && basic_statics_completed.length > 0) {
-      req.basic_statics_completed = basic_statics_completed;
-      next();
-    } else {
-      res.render('part/0-access-decline');
-    }
-
-  } catch (error) {
-    next(error);
-  }
-}
-
-// Middleware kiểm tra dữ liệu trùng lặp
-const checkDuplicateData = async (req, res, next) => {
-  try {
-    // Các xử lý khác
-    // ...
-
-    // Kiểm tra dữ liệu trùng lặp và gán giá trị cho duplicateDataMessage
-    let duplicateDataMessage = null; // Giá trị mặc định
-
-    const id = req.params.id;
-    const { user_id } = JSON.parse(req.body['{"user_id": "", "full_name": ""}']);
-
-    // Kiểm tra dữ liệu trùng lặp trong cơ sở dữ liệu
-    const query = 'SELECT COUNT(*) AS duplicateCount FROM event_group WHERE event_id = ? AND user_id_member = ? AND status = 1';
-    const result = await executeQuery(query, [id, user_id]);
-
-    const duplicateCount = result[0].duplicateCount;
-    if (duplicateCount > 0) {
-      console.log("Thêm dữ liệu trùng lập tại ID: "+id);
-      duplicateDataMessage = 'Dữ liệu trùng lặp!';
-      req.session.error = duplicateDataMessage; // Lưu thông báo lỗi vào session
-      return res.redirect('/edit/' + id); // Chuyển hướng đến trang /edit/:id
-    }
-
-    // Truyền giá trị cho duplicateDataMessage vào req để sử dụng trong API /add:id
-    req.duplicateDataMessage = duplicateDataMessage;
-
-    // Dữ liệu không trùng lặp, chuyển tiếp sang middleware hoặc xử lý tiếp theo
-    next();
+    const insertSql = `
+      INSERT INTO simple_earn (id, ccy, ts, \`day\`, \`hour\`, amt, rate, earnings, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `;
+
+    const row = rows[0];
+    await pool.execute(insertSql, [
+      row.id,
+      row.ccy,
+      row.ts,
+      row.day,
+      row.hour,
+      row['COALESCE(amt, 0)'],
+      row['COALESCE(rate, 0)'],
+      row['COALESCE(earnings, 0)'],
+      row.status
+    ]);
+
+    console.log(`✅ [${crypt}] Đã lưu simple earn thành công`);
   } catch (err) {
-    console.error(err);
-    res.status(500).send('Internal Server Error');
+    console.error(`❌ [${crypt}] Lỗi insertSimpleEarn:`, err.message);
   }
+}
+
+
+// Lên lịch chạy vào 23:00 hằng ngày (Asia/Ho_Chi_Minh)
+cron.schedule('06 * * * *',
+  async () => {
+    console.log('🕛 Daily insert start:', new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' }));
+    for (let crypt of crypts) {
+      await insertSimpleEarn(crypt);
+    }
+  },
+  { timezone: 'Asia/Ho_Chi_Minh' }
+);
+
+// Chạy tuần tự hoặc song song tuỳ theo bạn
+// (async () => {
+//   for (let crypt of crypts) {
+//       await insertSimpleEarn(crypt);
+//     console.log(`✔️ Done ${crypt}`);
+//   }
+// })();
+
+
+
+
+
+
+function safeDecimal(value) {
+  if (value === '' || value === null || value === undefined) return 0;
+  const num = parseFloat(value);
+  return isNaN(num) ? 0 : num;
+}
+
+
+// Không cần thiết lắm
+async function fetchBalance() {
+  const data = await okxRequest('GET', '/api/v5/account/balance');
+  const timestamp = new Date();
+
+  for (let item of data.data[0].details) {
+    const currency  = item.ccy || 'UNKNOWN';
+    const balance   = safeDecimal(item.eq);
+    const available = safeDecimal(item.availEq);
+    const frozen    = safeDecimal(item.frozenBal);
+
+    await pool.execute(`
+      INSERT INTO okx_balance (currency, balance, available, frozen, timestamp)
+      VALUES (?, ?, ?, ?, ?)
+    `, [currency, balance, available, frozen, timestamp]);
+  }
+
+  console.log('✅ Balance inserted');
+}
+
+function safeDate(ts) {
+  const date = new Date(Number(ts));
+  return isNaN(date.getTime()) ? new Date() : date; // fallback về thời gian hiện tại nếu lỗi
+}
+
+
+async function fetchBills() {
+  try {
+    const response = await okxRequest('GET', '/api/v5/account/bills');
+    const bills = response?.data ?? [];
+
+    if (bills.length === 0) {
+      console.log('ℹ️ Không có dữ liệu hóa đơn mới');
+      return;
+    }
+
+    for (const item of bills) {
+      const billId   = item.billId;
+      const currency = item.ccy || 'UNKNOWN';
+      const amount   = safeDecimal(item.balChg);
+      const type     = item.type || 'UNKNOWN';
+      const ts       = safeDate(item.ts);
+      const details  = JSON.stringify(item);
+
+      await pool.execute(`
+        INSERT IGNORE INTO okx_bills (bill_id, currency, amount, type, timestamp, details)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `, [billId, currency, amount, type, ts, details]);
+    }
+
+    console.log(`✅ Đã lưu ${bills.length} bản ghi hóa đơn`);
+  } catch (err) {
+    console.error('❌ Lỗi khi lấy dữ liệu hóa đơn:', err.message);
+  }
+}
+// (async () => {
+//   await fetchBills();
+// })();
+
+async function fetchAndStoreAccountBillsFlat0() {
+  try {
+    const response = await okxRequest('GET', '/api/v5/account/bills');
+    const bills = response?.data ?? [];
+
+    if (bills.length === 0) {
+      console.log('ℹ️ Không có dữ liệu hóa đơn mới');
+      return;
+    }
+
+    for (const r of bills) {
+      const sql = `
+        INSERT INTO account_bills (
+          bill_id, inst_type, type, sub_type, ts, bal_chg, pos_bal_chg, bal, pos_bal, sz, px, ccy,
+          pnl, fee, mgn_mode, inst_id, ord_id, exec_type, from_account, to_account, notes, interest,
+          tag, fill_time, trade_id, cl_ord_id, fill_idx_px, fill_mark_px, fill_px_vol, fill_px_usd,
+          fill_mark_vol, fill_fwd_px
+        ) VALUES (
+          ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+        )
+        ON DUPLICATE KEY UPDATE
+          bal_chg = VALUES(bal_chg),
+          fee = VALUES(fee),
+          interest = VALUES(interest),
+          ts = VALUES(ts)
+      `;
+
+      const values = [
+        r.billId,
+        r.instType ?? null,
+        r.type ?? null,
+        r.subType ?? null,
+        r.ts ? new Date(Number(r.ts)) : null,
+        r.balChg ? Number(r.balChg) : null,
+        r.posBalChg ? Number(r.posBalChg) : null,
+        r.bal ? Number(r.bal) : null,
+        r.posBal ? Number(r.posBal) : null,
+        r.sz ? Number(r.sz) : null,
+        r.px ? Number(r.px) : null,
+        r.ccy ?? null,
+        r.pnl ? Number(r.pnl) : null,
+        r.fee ? Number(r.fee) : null,
+        r.mgnMode ?? null,
+        r.instId ?? null,
+        r.ordId ?? null,
+        r.execType ?? null,
+        r.from ?? null,
+        r.to ?? null,
+        r.notes ?? null,
+        r.interest ? Number(r.interest) : null,
+        r.tag ?? null,
+        r.fillTime ? new Date(Number(r.fillTime)) : null,
+        r.tradeId ?? null,
+        r.clOrdId ?? null,
+        r.fillIdxPx ? Number(r.fillIdxPx) : null,
+        r.fillMarkPx ? Number(r.fillMarkPx) : null,
+        r.fillPxVol ? Number(r.fillPxVol) : null,
+        r.fillPxUsd ? Number(r.fillPxUsd) : null,
+        r.fillMarkVol ? Number(r.fillMarkVol) : null,
+        r.fillFwdPx ? Number(r.fillFwdPx) : null
+      ];
+
+      await pool.execute(sql, values);
+    }
+
+    console.log(`✅ Đã lưu ${bills.length} bản ghi hóa đơn tài khoản`);
+  } catch (err) {
+    console.error(`❌ Lỗi khi lấy dữ liệu hóa đơn tài khoản:`, err.message);
+  }
+}
+// (async () => {
+//   await fetchAndStoreAccountBillsFlat();
+// })();
+
+
+
+async function fetchAndStoreAccountBillsFlat() {
+  const windowStart = new Date('2025-09-05 00:00:00').getTime();
+  const windowEnd   = new Date('2025-09-11 13:00:00').getTime();  
+  try {
+    let cursor = windowStart;
+    let totalSaved = 0;
+
+    while (cursor < windowEnd) {
+      await delay(500); 
+      const params = new URLSearchParams({
+        limit: '100',
+        before: String(cursor)
+      });
+
+      const response = await okxRequest('GET', `/api/v5/account/bills?${params}`);
+      const bills = response?.data ?? [];
+
+      if (bills.length === 0) {
+        if (totalSaved === 0) {
+          console.log('ℹ️ Không có dữ liệu hóa đơn mới');
+        }
+        break;
+      }
+
+      for (const r of bills) {
+        const sql = `
+          INSERT INTO account_bills (
+            bill_id, inst_type, type, sub_type, ts, bal_chg, pos_bal_chg, bal, pos_bal, sz, px, ccy,
+            pnl, fee, mgn_mode, inst_id, ord_id, exec_type, from_account, to_account, notes, interest,
+            tag, fill_time, trade_id
+          ) VALUES (
+            ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+          )
+          ON DUPLICATE KEY UPDATE
+            bal_chg = VALUES(bal_chg),
+            fee = VALUES(fee),
+            interest = VALUES(interest),
+            ts = VALUES(ts)
+        `;
+
+        const values = [
+          r.billId,
+          r.instType ?? null,
+          r.type ?? null,
+          r.subType ?? null,
+          r.ts ? new Date(Number(r.ts)) : null,
+          r.balChg ? Number(r.balChg) : null,
+          r.posBalChg ? Number(r.posBalChg) : null,
+          r.bal ? Number(r.bal) : null,
+          r.posBal ? Number(r.posBal) : null,
+          r.sz ? Number(r.sz) : null,
+          r.px ? Number(r.px) : null,
+          r.ccy ?? null,
+          r.pnl ? Number(r.pnl) : null,
+          r.fee ? Number(r.fee) : null,
+          r.mgnMode ?? null,
+          r.instId ?? null,
+          r.ordId ?? null,
+          r.execType ?? null,
+          r.from ?? null,
+          r.to ?? null,
+          r.notes ?? null,
+          r.interest ? Number(r.interest) : null,
+          r.tag ?? null,
+          r.fillTime ? new Date(Number(r.fillTime)) : null,
+          r.tradeId ?? null
+        ];
+
+        await pool.execute(sql, values);
+      }
+      console.log(`✅ Đã thêm ${bills.length} ${response.bill_id} bản ghi mới cho table <account_bills>`);
+      totalSaved += bills.length;
+      // cursor = bills[bills.length - 1].ts;
+      cursor = cursor + (10*60*60*1000);
+    }
+
+    console.log(`✅ Đã lưu tổng cộng ${totalSaved} bản ghi hóa đơn tài khoản`);
+  } catch (err) {
+    if (err.response?.status === 401) {
+      console.error('❌ Lỗi xác thực: Kiểm tra API key, secret, passphrase và thời gian hệ thống');
+    } else {
+      console.error(`❌ Lỗi khi lấy dữ liệu hóa đơn tài khoản:`, err.message);
+    }
+  }
+}
+
+
+// (async () => {
+//   await fetchAndStoreAccountBillsFlat();
+//   await delay(500);  
+// })();
+
+
+
+async function fetchAndStoreAccountBillsFlat90() {
+
+  const windowStart = Date.now()- (1*60*60*1000); // thời điểm cách đây 1 giờ
+  const windowEnd   = Date.now();                 // thời điểm hiện tại
+  // const windowStart = new Date('2025-05-01 00:00:00').getTime();
+  // const windowEnd   = new Date('2025-10-01 00:00:00').getTime();  
+  // const windowEnd   = Date.now();
+  try {
+    let cursor = windowStart;
+    
+    let totalSaved = 0;
+
+    while (cursor < windowEnd) {
+      await delay(500); 
+      console.log(green(formatDateTime(cursor)));
+      const params = new URLSearchParams({
+        limit: '100',
+        begin: String(cursor)
+        // before: String(windowEnd)        
+      });
+
+      const response = await okxRequest('GET', `/api/v5/account/bills-archive?${params}`);
+            // for (let item of response.data) {
+            //   const billId   = item.billId;
+            //   const currency = item.ccy || 'UNKNOWN';
+            //   const amount   = safeDecimal(item.balChg);
+            //   const type     = item.type || 'UNKNOWN';
+            //   const ts       = safeDate(item.ts);
+            //   const details  = JSON.stringify(item);
+
+            //   await pool.execute(`
+            //     INSERT IGNORE INTO okx_bills (bill_id, currency, amount, type, timestamp, details)
+            //     VALUES (?, ?, ?, ?, ?, ?)
+            //     ON DUPLICATE KEY UPDATE
+            //       bill_id = VALUES(bill_id)
+            //   `, [billId, currency, amount, type, ts, details]);
+            // };
+            // console.log('✅ Bills inserted - OK BÊĐUÊ');
+      const bills = response?.data ?? [];
+      // console.log(`${red(JSON.stringify(response, null, 2))} `);
+
+      if (bills.length === 0) {
+        if (totalSaved === 0) {
+          console.log('ℹ️ Không có dữ liệu hóa đơn mới');
+        }
+        break;
+      }
+
+      const filteredBills = bills.filter(r => Number(r.ts) >= windowStart);
+
+      for (const r of filteredBills) {
+        const sql = `
+          INSERT INTO account_bills (
+            bill_id, inst_type, type, sub_type, ts, bal_chg, pos_bal_chg, bal, pos_bal, sz, px, ccy,
+            pnl, fee, mgn_mode, inst_id, ord_id, exec_type, from_account, to_account, notes, interest,
+            tag, fill_time, trade_id
+          ) VALUES (
+            ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+          )
+          ON DUPLICATE KEY UPDATE
+            bill_id = VALUES(bill_id)
+        `;
+
+        const values = [
+          r.billId,
+          r.instType ?? null,
+          r.type ?? null,
+          r.subType ?? null,
+          r.ts ? new Date(Number(r.ts)) : null,
+          r.balChg ? Number(r.balChg) : null,
+          r.posBalChg ? Number(r.posBalChg) : null,
+          r.bal ? Number(r.bal) : null,
+          r.posBal ? Number(r.posBal) : null,
+          r.sz ? Number(r.sz) : null,
+          r.px ? Number(r.px) : null,
+          r.ccy ?? null,
+          r.pnl ? Number(r.pnl) : null,
+          r.fee ? Number(r.fee) : null,
+          r.mgnMode ?? null,
+          r.instId ?? null,
+          r.ordId ?? null,
+          r.execType ?? null,
+          r.from ?? null,
+          r.to ?? null,
+          r.notes ?? null,
+          r.interest ? Number(r.interest) : null,
+          r.tag ?? null,
+          r.fillTime ? new Date(Number(r.fillTime)) : null,
+          r.tradeId ?? null
+        ];
+
+        await pool.execute(sql, values);
+        
+      }
+      console.log(`✅ Đã thêm ${filteredBills.length} bản ghi mới cho ${red('table <account_bills>')}`);
+      totalSaved += filteredBills.length;
+      cursor = Math.max(...bills.map(b => Number(b.ts))) + 1; // ✅ cập nhật cursor an toàn
+      
+      // cursor = cursor + (100*60*60*1000);
+    }
+    console.log('ℹ️ Không còn dữ liệu giao dịch mới');
+    console.log(`✅ Đã lưu tổng cộng ${totalSaved} bản ghi cho ${red('table <account_bills>')}`);
+    console.log();
+  } catch (err) {
+    if (err.response?.status === 401) {
+      console.error('❌ Lỗi xác thực: Kiểm tra API key, secret, passphrase và thời gian hệ thống');
+    } else {
+      console.error(`❌ Lỗi khi lấy dữ liệu hóa đơn tài khoản:`, err.message);
+    }
+  }
+}
+
+
+// (async () => {
+//   await fetchAndStoreAccountBillsFlat90();
+//   await delay(300);  
+// })();
+
+cron.schedule('02 * * * *', async () => {
+  console.log(`⏳ 9/2: Tiến trình lưu dữ liệu ${red('TRANSACTION')} thực thi`);
+  await fetchAndStoreAccountBillsFlat90();
+  
+});
+
+
+
+
+
+function localTime(ts) {
+  const utcTime = new Date(Number(ts));
+  if (isNaN(utcTime.getTime())) return null;
+
+  // Chuyển sang giờ Việt Nam (GMT+7)
+  const localTime = new Date(utcTime.getTime() + 7 * 60 * 60 * 1000);
+  return localTime;
+}
+
+
+
+async function fetchOrders() {
+  const path = '/api/v5/trade/orders-history?instType=SPOT';
+  const data = await okxRequest('GET', path);
+
+  for (let item of data.data) {
+    const orderId  = item.ordId;
+    const instId   = item.instId || 'UNKNOWN';
+    const side     = item.side || 'UNKNOWN';
+    const px       = safeDecimal(item.px);
+    const sz       = safeDecimal(item.sz);
+    const state    = item.state || 'UNKNOWN';
+    const timestamp       = safeDate(item.timestamp);        
+    const fillTime = safeDate(item.fillTime); 
+
+    const result = await pool.execute(`
+      INSERT IGNORE INTO okx_orders (order_id, instId, side, px, sz, state, timestamp, fill_time)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `, [orderId, instId, side, px, sz, state, timestamp, fillTime]);
+    const [res] = result;
+    if (res.affectedRows > 0 && res.insertId) {
+      console.log(`✅ Đã INSERT order mới: ${pink(orderId)}`);
+    }
+    // else {
+    //   console.log(`❌${red('Không')} INSERT order mới: ${pink(orderId)}`);
+    // }
+  };
+  
+  
+}
+
+
+
+async function fetchOrderDetail(ordId, instId) {
+  const path = `/api/v5/trade/order?ordId=${ordId}&instId=${instId}`;
+  const data = await okxRequest('GET', path);
+
+  if (!data.data || !data.data.length) {
+    console.warn(`❌ Không tìm thấy lệnh ${ordId}`);
+    return;
+  }
+
+  const item = data.data[0];
+
+  const values = [
+    item.ordId,
+    item.instId || 'UNKNOWN',
+    item.side || 'UNKNOWN',
+    item.ordType || 'UNKNOWN',
+    safeDecimal(item.px),
+    safeDecimal(item.sz),
+    safeDecimal(item.fee),
+    item.state || 'UNKNOWN',
+    safeDate(item.ts),
+    safeDate(item.fillTime),
+    item.pnl || '0' // ✅ Thêm P&L, mặc định là '0' nếu không có
+  ];
+
+  const [res] = await pool.execute(`
+    INSERT IGNORE INTO okx_order_detail (
+      ordId, instId, side, ordType, px, sz, fee, state, ts, fillTime, pnl
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON DUPLICATE KEY UPDATE
+      fee = VALUES(fee),
+      state = VALUES(state),
+      ts = VALUES(ts),
+      fillTime = VALUES(fillTime),
+      pnl = VALUES(pnl)
+  `, values);
+
+  // console.log(`✅ Đã lưu chi tiết lệnh ${ordId}`);
+  // console.log(pink(result));
+  // console.log(`${red(JSON.stringify([res], null, 2))} `);
+  // if (result.insertId > 0) {
+  //     console.log(green(`✅ Dữ liệu INSERT thành công: ${ordId}`), );
+  //   };
+  if (res.affectedRows > 0 && res.insertId) {
+    console.log(`✅ Đã INSERT order mới: ${pink(ordId)}`);
+  }
+}
+
+
+async function fetchAllOrderDetails() {
+  const [rows] = await pool.execute(`
+    SELECT order_id AS ordId, instId FROM okx_orders
+    WHERE fill_time IS NOT NULL -- chỉ lấy lệnh đã khớp
+  `);
+
+  for (let row of rows) {
+    const ordId = row.ordId;
+    const instId = row.instId;
+
+    if (!ordId || !instId) {
+      console.warn(`⚠️ Thiếu ordId hoặc instId, bỏ qua`);
+      continue;
+    }
+
+    await fetchOrderDetail(ordId, instId);
+  }
+
+  console.log('✅ Đã lấy chi tiết cho tất cả lệnh đã khớp');
+}
+// (async () => {
+//   // await fetchBalance();
+//   // await fetchBills();
+//   // await fetchOrders();
+//   await fetchAllOrderDetails();
+// })();
+
+cron.schedule('07 * * * *', async () => {
+  console.log('⏳ 1/2: Tiến trình lưu dữ liệu trading thực thi');
+  await fetchOrders();
+  
+});
+cron.schedule('09 * * * *', async () => {
+  console.log('⏳ 2/2: Tiến trình lưu dữ liệu trading-detail thực thi');
+  
+  await fetchAllOrderDetails();
+});
+
+
+
+// Code thực hiện lấy dữ liệu trong khoảng thời gian xác định
+async function fetchOrdersInRange() {
+  const begin = new Date('2025-06-01T00:00:00Z').getTime(); // milliseconds
+  const end = new Date('2025-06-01T23:59:59Z').getTime();     // milliseconds
+  
+
+  const path = `/api/v5/trade/orders-history-archive?instType=SPOT&begin=${begin}&end=${end}`;
+  const data = await okxRequest('GET', path);
+
+  for (let item of data.data) {
+    const orderId  = item.ordId;
+    const instId   = item.instId || 'UNKNOWN';
+    const side     = item.side || 'UNKNOWN';
+    const px       = safeDecimal(item.px);
+    const sz       = safeDecimal(item.sz);
+    const state    = item.state || 'UNKNOWN';
+    const timestamp = safeDate(item.timestamp);        
+    const fillTime  = safeDate(item.fillTime); 
+
+    const result = await pool.execute(`
+      INSERT IGNORE INTO okx_orders (order_id, instId, side, px, sz, state, timestamp, fill_time)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `, [orderId, instId, side, px, sz, state, timestamp, fillTime]);
+
+    const [res] = result;
+    if (res.affectedRows > 0 && res.insertId) {
+      console.log(`✅ Đã INSERT order mới: ${pink(orderId)}`);
+    }
+    else{
+      console.log(`✅ Không có INSERT order mới trong khoản thời gian: `, formatDateTime(begin), formatDateTime(end));
+    }
+  }
+}
+// (async () => {
+//   await fetchOrdersInRange();
+//   console.log('⏳ 3/2: Tiến trình lưu dữ liệu trading-theo thời gian lựa chọn thực thi');
+// })();
+
+
+
+// Đây là code quét giao dịch API lưu vào table okx_orders từ cột mốc startDate tới hiện tại
+async function fetchOrdersArchiveFullScan(startDate = '2025-06-01T00:00:00Z') {
+  const chunkSizeMs = 6 * 60 * 60 * 1000; // 6 giờ
+  const now = Date.now();
+  let begin = new Date(startDate).getTime();
+
+  while (begin < now) {
+    const end = Math.min(begin + chunkSizeMs, now);
+    console.log(`🔎 Đang quét từ ${formatDateTime(begin)} đến ${formatDateTime(end)}`);
+
+    let path = `/api/v5/trade/orders-history-archive?instType=SPOT&begin=${begin}&end=${end}`;
+    let hasMore = true;
+    let after = null;
+
+    while (hasMore) {
+      const pagedPath = after ? `${path}&after=${after}` : path;
+      const data = await okxRequest('GET', pagedPath);
+
+      if (!data.data || data.data.length === 0) {
+        console.log(`⚠️ Không có dữ liệu trong khoảng: ${formatDateTime(begin)} → ${formatDateTime(end)}`);
+        break;
+      }
+
+      for (let item of data.data) {
+        const orderId  = item.ordId;
+        const instId   = item.instId || 'UNKNOWN';
+        const side     = item.side || 'UNKNOWN';
+        const px       = safeDecimal(item.px);
+        const sz       = safeDecimal(item.sz);
+        const state    = item.state || 'UNKNOWN';
+        const timestamp = safeDate(item.timestamp);        
+        const fillTime  = safeDate(item.fillTime); 
+
+        // Kiểm tra xem order đã tồn tại chưa
+        const [rows] = await pool.execute(`SELECT 1 FROM okx_orders WHERE order_id = ? LIMIT 1`, [orderId]);
+        if (rows.length === 0) {
+          const result = await pool.execute(`
+            INSERT INTO okx_orders (order_id, instId, side, px, sz, state, timestamp, fill_time)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          `, [orderId, instId, side, px, sz, state, timestamp, fillTime]);
+
+          const [res] = result;
+          if (res.affectedRows > 0) {
+            console.log(`✅ INSERT order mới: ${pink(orderId)}`);
+          }
+        } else {
+          console.log(`⏩ Đã tồn tại order: ${orderId}`);
+        }
+      }
+
+      // Nếu có next page
+      if (data.data.length === 100) {
+        after = data.data[data.data.length - 1].ts;
+      } else {
+        hasMore = false;
+      }
+    }
+
+    begin = end;
+    await delay(300); // nghỉ nhẹ giữa các lần quét
+  }
+
+  console.log('✅ Hoàn tất quét toàn bộ dữ liệu từ 01/06/2025 đến hiện tại');
+}
+
+// (async () => {
+//   await fetchOrdersArchiveFullScan();
+//   console.log('⏳ 4/2: Tiến trình lưu dữ liệu trading-theo FULL-SCAN từ 01/06/2025 thực thi');
+// })();
+
+
+
+// Đây là code quét giao dịch API trading-detail FULL-SCAN lưu vào table okx_orders từ cột mốc startDate tới hiện tại 
+async function fetchFillsHistoryFullScan(startDate = '2025-06-01T00:00:00Z') {
+  const chunkSizeMs = 6 * 60 * 60 * 1000; // 6 giờ
+  const now = Date.now();
+  let begin = new Date(startDate).getTime();
+
+  while (begin < now) {
+    const end = Math.min(begin + chunkSizeMs, now);
+    console.log(`🔍 Quét fills từ ${formatDateTime(begin)} đến ${formatDateTime(end)}`);
+
+    let path = `/api/v5/trade/fills-history?instType=SPOT&begin=${begin}&end=${end}`;
+    let hasMore = true;
+    let after = null;
+
+    while (hasMore) {
+      const pagedPath = after ? `${path}&after=${after}` : path;
+      const data = await okxRequest('GET', pagedPath);
+
+      if (!data.data || data.data.length === 0) {
+        console.log(`⚠️ Không có fills trong khoảng: ${formatDateTime(begin)} → ${formatDateTime(end)}`);
+        break;
+      }
+
+      for (let item of data.data) {
+        const ordId    = item.ordId;
+        const instId   = item.instId || 'UNKNOWN';
+        const side     = item.side || 'UNKNOWN';
+        const ordType  = item.ordType || 'UNKNOWN';
+        const px       = safeDecimal(item.px);
+        const sz       = safeDecimal(item.sz);
+        const fee      = safeDecimal(item.fee);
+        const state    = item.state || 'UNKNOWN';
+        const ts       = safeDate(item.ts);
+        const fillTime = safeDate(item.fillTime);
+        const pnl      = safeDecimal(item.pnl);
+
+        // Kiểm tra xem fill đã tồn tại chưa
+        const [rows] = await pool.execute(`SELECT 1 FROM okx_order_detail WHERE ordId = ? AND ts = ? LIMIT 1`, [ordId, ts]);
+        if (rows.length === 0) {
+          const result = await pool.execute(`
+            INSERT IGNORE INTO okx_order_detail (
+                ordId, instId, side, ordType, px, sz, fee, state, ts, fillTime, pnl
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              ON DUPLICATE KEY UPDATE
+                fee = VALUES(fee),
+                state = VALUES(state),
+                ts = VALUES(ts),
+                fillTime = VALUES(fillTime),
+                pnl = VALUES(pnl)
+          `, [ordId, instId, side, ordType, px, sz, fee, state, ts, fillTime, pnl]);
+
+          const [res] = result;
+          if (res.affectedRows > 0) {
+            console.log(`✅ INSERT fill mới: ${pink(ordId)} @ ${formatDateTime(ts)}`);
+          }
+        } else {
+          console.log(`⏩ Fill đã tồn tại: ${ordId} @ ${formatDateTime(ts)}`);
+        }
+      }
+
+      // Nếu có next page
+      if (data.data.length === 100) {
+        after = data.data[data.data.length - 1].ts;
+      } else {
+        hasMore = false;
+      }
+    }
+
+    begin = end;
+    await delay(500); // nghỉ nhẹ giữa các lần quét
+  }
+
+  console.log('✅ Hoàn tất quét toàn bộ fills từ 01/06/2025 đến hiện tại');
+}
+// (async () => {
+//   await fetchFillsHistoryFullScan();
+//   console.log('⏳ 5/2: Tiến trình lưu dữ liệu trading-detail FULL-SCAN từ 01/06/2025 thực thi');
+// })();
+
+
+
+
+
+// Retry thông minh khi bị lỗi 429
+async function safeOkxRequest(method, path, body = '', retries = 5, delayMs = 1000) {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      return await okxRequest(method, path, body);
+    } catch (err) {
+      if (err.response?.status === 429) {
+        console.warn(`⚠️ Rate limit hit. Retry ${attempt}/${retries} after ${delayMs}ms`);
+        await delay(delayMs);
+        delayMs *= 2; // tăng dần thời gian chờ
+      } else {
+        throw err;
+      }
+    }
+  }
+  throw new Error(`Exceeded retry limit due to rate limiting`);
+}
+async function fetchAndStoreSpotBorrowRepayHistory(ccy) {
+  try {
+    if (!ccy || typeof ccy !== 'string') {
+      throw new Error(`Invalid currency code: ${ccy}`);
+    }
+
+    let afterTs = Date.now() - 7 * 24 * 60 * 60 * 1000; // 7 ngày trước
+    const nowTs = Date.now();
+
+    while (afterTs < nowTs) {
+      await delay(200); // tránh spam API
+
+      const params = new URLSearchParams({
+        ccy,
+        after: String(nowTs),
+        before: String(afterTs),
+        limit: '100'
+      });
+
+      const path = `/api/v5/account/spot-borrow-repay-history?${params}`;
+      let response;
+
+      try {
+        response = await safeOkxRequest('GET', path);
+      } catch (apiErr) {
+        throw new Error(`API call failed for ${ccy}: ${apiErr.message}`);
+      }
+
+      const { code, data, msg } = response;
+
+      if (code !== '0') {
+        throw new Error(`OKX API error ${code} for ${ccy}: ${msg || 'Unknown error'}`);
+      }
+
+      if (!Array.isArray(data) || data.length === 0) {
+        console.warn(`⚠️ Không có dữ liệu trả về cho ${ccy}`);
+        break;
+      }
+
+      // Ghi log từng bản ghi để kiểm tra giá trị amt
+      // data.forEach((r, i) => {
+      //   console.log(`🔍 Record ${i}: ccy=${r.ccy}, type=${r.type}, amt=${r.amt}, accBorrowed=${r.accBorrowed}, ts=${r.ts}`);
+      // });
+
+      const filteredData = data.filter(r =>
+        r.ts && r.type && r.ccy &&
+        r.amt !== undefined && r.amt !== null && r.amt !== ''
+      );
+
+      if (filteredData.length === 0) {
+        console.warn(`⚠️ Không có bản ghi hợp lệ để lưu cho ${ccy}`);
+        break;
+      }
+
+      const values = filteredData.map(r => [
+        r.ccy ?? null,
+        r.type ?? null,
+        Number(r.amt),
+        r.accBorrowed !== undefined && r.accBorrowed !== null && r.accBorrowed !== '' ? Number(r.accBorrowed) : null,
+        new Date(Number(r.ts))
+      ]);
+
+      const placeholders = values.map(() => '(?,?,?,?,?)').join(',');
+
+      const sql = `
+        INSERT INTO spot_borrow_repay_history
+          (ccy, type, amt, acc_borrowed, ts)
+        VALUES ${placeholders}
+        ON DUPLICATE KEY UPDATE
+          amt = VALUES(amt),
+          acc_borrowed = VALUES(acc_borrowed)
+      `;
+
+      try {
+        await pool.execute(sql, values.flat());
+        console.log(`✅ Đã lưu ${values.length} bản ghi cho ${ccy}`);
+      } catch (dbErr) {
+        throw new Error(`Database error for ${ccy}: ${dbErr.message}`);}
+
+
+      const maxTs = Math.max(...filteredData.map(r => Number(r.ts)));
+      afterTs = maxTs + 1;
+    }
+  } catch (err) {
+    console.error(`❌ Lỗi khi lấy lịch sử borrow/repay cho ${ccy || 'unknown'}:`, err.message);
+  }
+}
+
+// Chạy tuần tự từng mã với delay giữa các lần gọi
+// (async () => {
+//   for (const ccy of ccys) {
+//     await fetchAndStoreSpotBorrowRepayHistory(ccy);
+//     await delay(1000); // delay 1 giây giữa các đồng để tránh bị chặn
+//   }
+// })();
+
+cron.schedule('04 * * * *', () => {
+(async () => {
+  for (const ccy of ccys) {
+    await fetchAndStoreSpotBorrowRepayHistory(ccy);
+    await delay(1000); // delay 1 giây giữa các đồng để tránh bị chặn
+  }
+})();
+}, { tz: 'Asia/Ho_Chi_Minh' });
+
+
+
+
+
+
+
+
+
+async function fetchAndStoreInterestAccrued0(ccy) {
+  try {
+    const path = `/api/v5/account/interest-accrued?${new URLSearchParams({ ccy, limit: '100' })}`;
+    const response = await safeOkxRequest('GET', path);
+
+    const { code, data, msg } = response;
+    if (code !== '0') throw new Error(`OKX API error ${code}: ${msg || 'Unknown error'}`);
+    if (!Array.isArray(data) || data.length === 0) {
+      console.warn(`⚠️ Không có dữ liệu lãi suất tích lũy cho ${ccy}`);
+      return;
+    }
+
+    // Ghi log để kiểm tra dữ liệu
+    // data.forEach((r, i) => {
+    //   console.log(`🔍 [${i}] ccy=${r.ccy}, interest=${r.interest}, interestRate=${r.interestRate}, liab=${r.liab}, ts=${r.ts}`);
+    // });
+
+    const values = data.map(r => [
+      r.ccy ?? null,
+      r.interest ? Number(r.interest) : null,
+      r.interestRate ? Number(r.interestRate) : null,
+      r.liab ? Number(r.liab) : null,
+      r.ts ? new Date(Number(r.ts)) : null
+    ]);
+
+    const sql = `
+      INSERT INTO interest_accrued
+        (ccy, interest, interest_rate, liab, ts)
+      VALUES ${values.map(() => '(?,?,?,?,?)').join(',')}
+      ON DUPLICATE KEY UPDATE
+        interest = VALUES(interest),
+        interest_rate = VALUES(interest_rate),
+        liab = VALUES(liab)
+    `;
+
+    await pool.execute(sql, values.flat());
+    console.log(`✅ Đã lưu ${values.length} bản ghi lãi suất cho ${ccy}`);
+  } catch (err) {
+    console.error(`❌ Lỗi khi lấy dữ liệu lãi suất tích lũy cho ${ccy}:`, err.message);
+  }
+}
+
+
+
+
+
+
+
+async function fetchAndStoreInterestAccrued(ccy) {
+  try {
+    const path = `/api/v5/account/interest-accrued?${new URLSearchParams({ ccy, limit: '100' })}`;
+    const response = await safeOkxRequest('GET', path);
+
+    const { code, data, msg } = response;
+    if (code !== '0') throw new Error(`OKX API error ${code}: ${msg || 'Unknown error'}`);
+    if (!Array.isArray(data) || data.length === 0) {
+      console.warn(`⚠️ Không có dữ liệu lãi suất tích lũy cho ${ccy}`);
+      return;
+    }
+
+    // Lấy danh sách timestamp đã tồn tại trong DB
+    const existingTsQuery = `
+      SELECT ts FROM interest_accrued WHERE ccy = ?
+    `;
+    const [existingRows] = await pool.execute(existingTsQuery, [ccy]);
+    const existingTimestamps = new Set(existingRows.map(row => row.ts.getTime()));
+
+    // Lọc ra bản ghi mới
+    const newRecords = data.filter(r => {
+      const ts = r.ts ? Number(r.ts) : null;
+      return ts && !existingTimestamps.has(ts);
+    });
+
+    if (newRecords.length === 0) {
+      console.log(`ℹ️ Không có bản ghi mới cho ${ccy}`);
+      return;
+    }
+
+    const values = newRecords.map(r => [
+      r.ccy ?? null,
+      r.interest ? Number(r.interest) : null,
+      r.interestRate ? Number(r.interestRate) : null,
+      r.liab ? Number(r.liab) : null,
+      r.ts ? new Date(Number(r.ts)) : null
+    ]);
+
+    const sql = `
+      INSERT INTO interest_accrued
+        (ccy, interest, interest_rate, liab, ts)
+      VALUES ${values.map(() => '(?,?,?,?,?)').join(',')}
+    `;
+
+    await pool.execute(sql, values.flat());
+    console.log(`✅ Đã thêm ${values.length} bản ghi nợk nầk chồnk chấk mới cho ${ccy}`);
+  } catch (err) {
+    console.error(`❌ Lỗi khi lấy dữ liệu lãi suất tích lũy cho ${ccy}:`, err.message);
+  }
+}
+// (async () => {
+//   for (const ccy of ccys) {
+//     await fetchAndStoreInterestAccrued(ccy);
+//     await delay(1000); // tránh bị chặn
+//   }
+// })();
+
+cron.schedule('04 * * * *', () => {
+(async () => {
+  for (const ccy of ccys) {
+    await fetchAndStoreInterestAccrued(ccy);
+    await delay(1000); // delay 1 giây giữa các đồng để tránh bị chặn
+  }
+})();
+}, { tz: 'Asia/Ho_Chi_Minh' });
+
+
+
+
+async function fetchAllInterestAccrued_selected(ccy) {
+  const windowStart = new Date('2025-09-10 15:00:00').getTime();
+  const windowEnd   = new Date('2025-09-11 09:00:00').getTime();  
+
+  try {
+    let cursor = windowStart;
+    let totalNewRecords = 0;
+
+    while (cursor < windowEnd) {
+      await delay(500); 
+      const params = new URLSearchParams({
+        ccy,
+        limit: '100',
+        before: String(cursor)
+        // after: String(windowEnd)        
+      });
+
+      const path = `/api/v5/account/interest-accrued?${params}`;
+      const response = await safeOkxRequest('GET', path);
+
+      const { code, data, msg } = response;
+      if (code !== '0') throw new Error(`OKX API error ${code}: ${msg || 'Unknown error'}`);
+      if (!Array.isArray(data) || data.length === 0) {
+        console.log(`✅ Đã hoàn tất lấy dữ liệu cho ${ccy}`);
+        break;
+      }
+
+      // Lấy timestamp đã có trong DB
+      const [existingRows] = await pool.execute(
+        `SELECT ts FROM interest_accrued WHERE ccy = ?`,
+        [ccy]
+      );
+      const existingTsSet = new Set(existingRows.map(row => row.ts.getTime()));
+
+      // Lọc bản ghi mới
+      const newRecords = data.filter(r => {
+        const ts = r.ts ? Number(r.ts) : null;
+        return ts && !existingTsSet.has(ts);
+      });
+
+      if (newRecords.length === 0) {
+        console.log(`ℹ️ Không có bản ghi mới trong đoạn ${formatDateTime(cursor)} → ${formatDateTime(windowEnd)} cho ${ccy}`);
+        break;
+      }
+
+      const values = newRecords.map(r => [
+        r.ccy ?? null,
+        r.interest ? Number(r.interest) : null,
+        r.interestRate ? Number(r.interestRate) : null,
+        r.liab ? Number(r.liab) : null,
+        r.ts ? new Date(Number(r.ts)) : null
+      ]);
+
+      const sql = `
+        INSERT INTO interest_accrued
+          (ccy, interest, interest_rate, liab, ts)
+        VALUES ${values.map(() => '(?,?,?,?,?)').join(',')}
+      `;
+
+      await pool.execute(sql, values.flat());
+      console.log(`✅ Đã thêm ${values.length} bản ghi mới cho ${ccy}`);
+      totalNewRecords += values.length;
+
+      // Cập nhật cursor theo bản ghi mới nhất
+      // cursor = Math.max(...newRecords.map(r => Number(r.ts))) + 1;
+
+      cursor = cursor - (100*60*60*1000); // tăng 100h trở về quá khứ để vòng lặp mới limit 100 bắt đầu      
+    }
+
+    console.log(`🎯 Tổng cộng đã thêm ${totalNewRecords} bản ghi mới cho ${ccy}`);
+  } catch (err) {
+    console.error(`❌ Lỗi khi lấy dữ liệu lãi suất tích lũy cho ${ccy}:`, err.message);
+  }
+}
+// (async () => {
+//     await fetchAllInterestAccrued('USDT');
+//     await delay(500);  
+// })();
+
+
+// (async () => {
+//   for (const ccy of ccys) {
+//     await fetchAllInterestAccrued('USDT');
+//     await delay(1000);
+//   }
+// })();
+
+
+
+
+
+
+
+const billTypes = {
+  1: 'Transfer',
+  2: 'Trade',
+  3: 'Delivery',
+  4: 'Forced repayment',
+  5: 'Liquidation',
+  6: 'Margin transfer',
+  7: 'Interest deduction',
+  8: 'Funding fee',
+  9: 'ADL',
+  10: 'Clawback',
+  11: 'System token conversion',
+  12: 'Strategy transfer',
+  13: 'DDH',
+  14: 'Block trade',
+  15: 'Quick Margin',
+  16: 'Borrowing',
+  22: 'Repay',
+  24: 'Spread trading',
+  26: 'Structured products',
+  27: 'Convert',
+  28: 'Easy convert',
+  29: 'One-click repay',
+  30: 'Simple trade',
+  32: 'Move position',
+  33: 'Loans',
+  34: 'Settlement',
+  250: 'Copy trader profit sharing expenses',
+  251: 'Copy trader profit sharing refund'
 };
 
-function Login(req, res, next) {// Function gắn vào middleware cho các route cần kiểm tra đăng nhập
-  if (!req.session.user) {
-    return res.redirect('/login');
-  }
-  next();
-}
+const billSubtypes = {
+  1: 'Buy',
+  2: 'Sell',
+  3: 'Open long',
+  4: 'Open short',
+  5: 'Close long',
+  6: 'Close short',
+  9: 'Interest deduction for Market loans',
+  11: 'Transfer in',
+  12: 'Transfer out',
+  14: 'Interest deduction for VIP loans',
+  16: 'Repay forcibly',
+  17: 'Repay interest by borrowing forcibly',
+  100: 'Partial liquidation close long',
+  101: 'Partial liquidation close short',
+  102: 'Partial liquidation buy',
+  103: 'Partial liquidation sell',
+  104: 'Liquidation long',
+  105: 'Liquidation short',
+  106: 'Liquidation buy',
+  107: 'Liquidation sell',
+  108: 'Clawback',
+  110: 'Liquidation transfer in',
+  111: 'Liquidation transfer out',
+  112: 'Delivery long',
+  113: 'Delivery short',
+  114: 'Forced repayment buy',
+  115: 'Forced repayment sell',
+  117: 'Delivery/Exercise clawback',
+  118: 'System token conversion transfer in',
+  119: 'System token conversion transfer out',
+  125: 'ADL close long',
+  126: 'ADL close short',
+  127: 'ADL buy',
+  128: 'ADL sell',
+  131: 'ddh buy',
+  132: 'ddh sell',
+  160: 'Manual margin increase',
+  161: 'Manual margin decrease',
+  162: 'Auto margin increase',
+  170: 'Exercised(ITM buy side)',
+  171: 'Counterparty exercised(ITM sell side)',
+  172: 'Expired(Non-ITM buy and sell side)',
+  173: 'Funding fee expense',
+  174: 'Funding fee income',
+  200: 'System transfer in',
+  201: 'Manually transfer in',
+  202: 'System transfer out',
+  203: 'Manually transfer out',
+  204: 'block trade buy',
+  205: 'block trade sell',
+  206: 'block trade open long',
+  207: 'block trade open short',
+  208: 'block trade close long',
+  209: 'block trade close short',
+  210: 'Manual Borrowing of quick margin',
+  211: 'Manual Repayment of quick margin',
+  212: 'Auto borrow of quick margin',
+  213: 'Auto repay of quick margin',
+  220: 'Transfer in when using USDT to buy OPTION',
+  221: 'Transfer out when using USDT to buy OPTION',
+  224: 'Repayment transfer in',
+  225: 'Repayment transfer out',
+  236: 'Easy convert in',
+  237: 'Easy convert out',
+  250: 'Profit sharing expenses',
+  251: 'Profit sharing refund',
+  270: 'Spread trading buy',
+  271: 'Spread trading sell',
+  272: 'Spread trading open long',
+  273: 'Spread trading open short',
+  274: 'Spread trading close long',
+  275: 'Spread trading close short',
+  280: 'SPOT profit sharing expenses',
+  281: 'SPOT profit sharing refund',
+  282: 'Spot profit share income',
+  283: 'Asset transfer for spot copy trading',
+  284: 'Copy trade automatic transfer in',
+  285: 'Copy trade manual transfer in',
+  286: 'Copy trade automatic transfer out',
+  287: 'Copy trade manual transfer out',
+  290: 'Crypto dust auto-transfer out',
+  293: 'Fixed loan interest deduction',
+  294: 'Fixed loan interest refund',
+  295: 'Fixed loan overdue penalty',
+  296: 'From structured order placements',
+  297: 'To structured order placements',
+  298: 'From structured settlements',
+  299: 'To structured settlements',
+  306: 'Manual borrow',
+  307: 'Auto borrow',
+  308: 'Manual repay',
+  309: 'Auto repay',
+  312: 'Auto offset',
+  318: 'Convert in',
+  319: 'Convert out',
+  320: 'Simple buy',
+  321: 'Simple sell',
+  324: 'Move position buy',
+  325: 'Move position sell',
+  326: 'Move position open long',
+  327: 'Move position open short',
+  328: 'Move position close long',
+  329: 'Move position close short',
+  332: 'Margin transfer in isolated margin position',
+  333: 'Margin transfer out isolated margin position',
+  334: 'Margin loss when closing isolated margin position',
+  355: 'Settlement PnL',
+  376: 'Collateralized borrowing auto conversion buy',
+  377: 'Collateralized borrowing auto conversion sell',
+  381: 'Auto lend interest transfer in',
+  372: 'Bot airdrop (transfer in)',
+  373: 'Bot airdrop (transfer out)',
+  374: 'Bot airdrop reclaim (transfer in)',
+  375: 'Bot airdrop reclaim (transfer out)'
+};
+
+// for (const [code, name] of Object.entries(billTypes)) {
+//   (async () => {
+//   await pool.execute(
+//     `INSERT INTO okx_bill_types (type_code, type_name) VALUES (?, ?)`,
+//     [Number(code), name]
+//   );
+//   })();
+// }
+
+// for (const [code, name] of Object.entries(billSubtypes)) {
+//   (async () => {
+//   await pool.execute(
+//     `INSERT INTO okx_bill_subtypes (subtype_code, subtype_name) VALUES (?, ?)`,
+//     [Number(code), name]
+//   );
+//   })();
+// }
 
-// ---------------------------------API Home-----------------------------------//
-// ----------------------------------RESTful-----------------------------------//
-
-app.get('/home', requireLogin, staticsCompleted, async function(req, res) {
-  try {
-    const obj = { print: null };
-    const months = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"];
-    const user_id_perform = req.session.user.user_id;
-    
-    for (const month of months) {
-      const result = await executeQuery(`select  a.*, b.user_id_member, YEAR(sysdate()) AS current_year
-                                          from thang${month} a, event_group b 
-                                          where a.id = b.event_id 
-                                            and a.status = 1
-                                            and b.status = 1 
-                                            and b.event_member_id_child = 0
-                                            and year(a.date_create) = year(sysdate())
-                                            and b.user_id_member in (?)`,[user_id_perform]);
-      obj[`printT${month}`] = result;
-    }
-
-    const year = await executeQuery(`SELECT YEAR(CURRENT_DATE) AS this_year`);
-        if (year && year.length > 0) {
-          obj.printyear = year[0].this_year;
-        };
-
-    const { print, ...printTs } = obj;
-
-    res.render("./route-home", { obj, print, ...printTs, user_id_perform, user: req.session.user });
-  }
-  catch (err) {console.error(err);
-                res.status(500).send('Internal Server Error');
-  }
-});
-
-app.get('/home-last-year-:idYear', requireLogin, staticsCompleted, async function(req, res) {
-  try {
-    const obj = { print: null };
-    const months = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"];
-    const user_id_perform = req.session.user.user_id;
-    const idYear = req.params.idYear - 1;
-    
-    for (const month of months) {
-      const result = await executeQuery(`select  a.*, b.user_id_member, YEAR(sysdate()) AS current_year
-                                          from thang${month} a, event_group b 
-                                          where a.id = b.event_id 
-                                            and a.status = 1
-                                            and b.status = 1 
-                                            and b.event_member_id_child = 0
-                                            and year(a.date_create) = (?)
-                                            and b.user_id_member in (?)`,[idYear ,user_id_perform]);
-      obj[`printT${month}`] = result;
-    }
-
-    obj.printyear = idYear;
-
-    const { print, ...printTs } = obj;
-
-    res.render("./route-home", { obj, print, ...printTs, user_id_perform, user: req.session.user });
-  }
-  catch (err) {console.error(err);
-                res.status(500).send('Internal Server Error');
-  }
-});
-
-app.get('/home-next-year-:idYear', requireLogin, staticsCompleted, async function(req, res) {
-  try {
-    const obj = { print: null };
-    const months = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"];
-    const user_id_perform = req.session.user.user_id;
-    const idYear = parseInt(req.params.idYear) + 1;
-    
-    for (const month of months) {
-      const result = await executeQuery(`select  a.*, b.user_id_member, YEAR(sysdate()) AS current_year
-                                          from thang${month} a, event_group b 
-                                          where a.id = b.event_id 
-                                            and a.status = 1
-                                            and b.status = 1 
-                                            and b.event_member_id_child = 0
-                                            and year(a.date_create) = (?)
-                                            and b.user_id_member in (?)`,[idYear ,user_id_perform]);
-      obj[`printT${month}`] = result;
-    }
-
-    obj.printyear = idYear;
-
-    const { print, ...printTs } = obj;
-
-    res.render("./route-home", { obj, print, ...printTs, user_id_perform, user: req.session.user });
-  }
-  catch (err) {console.error(err);
-                res.status(500).send('Internal Server Error');
-  }
-});
-
-
-    app.get('/home-show/:id', requireLogin, notExist, staticsCompleted, async function(req, res) {
-      try {
-        const id = req.params.id;
-        const kpi_id = req.params.id;
-        const months = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"];
-        const obj = { print: null };
-        const user_id_perform = req.session.user.user_id;
-        const depart_ID = req.session.user.department_id;
-        
-        const basic_statics_completed = req.basic_statics_completed;
-        const basic_statics_Uncompleted = req.basic_statics_Uncompleted;
-        const basic_statics_percent = req.basic_statics_percent;
-
-        const basic_statics_selectA = req.basic_statics_selectA;
-        const basic_statics_selectApercent = req.basic_statics_selectApercent;
-        const basic_statics_selectB = req.basic_statics_selectB;
-        const basic_statics_selectBpercent = req.basic_statics_selectBpercent;
-        const basic_statics_selectC = req.basic_statics_selectC;
-        const basic_statics_selectCpercent = req.basic_statics_selectCpercent;
-        const basic_statics_selectD = req.basic_statics_selectD;
-        const basic_statics_selectDpercent = req.basic_statics_selectDpercent;
-
-        const deparment = req.deparment;
-
-        // Nội dung sự kiện
-        for (const month of months) {
-          const queryMonth = ` SELECT * FROM THANG${month} where id =?` ;
-          const resultMonth = await executeQuery(queryMonth, [id]);
-          obj[`printT${month}`] = resultMonth;
-        }
-        
-        // Nội dung Thành viên tham gia
-        const queries = months.map(month => ({
-          query: `SELECT  a.*, 
-                          DATE_FORMAT(a.date_create, '%d/%m/%Y') AS date_create,
-                          DAY(date_create) AS date_create_number,
-                          MONTH(date_create) AS month_create_number,
-                          YEAR(date_create) AS year_create_number,
-                          DATE_FORMAT(date_create, '%m/%Y') AS month_year_start,
-                          DATE_FORMAT(CURRENT_DATE, '%m/%Y') AS month_year_current
-                    FROM THANG${month} a WHERE a.id = ?`
-        }));
-
-        for (const { query } of queries) {
-          const result = await executeQuery(query, [id]);
-          if (result && result.length > 0) {
-            obj.print = result;
-          } 
-        }
-
-        const rowspanMember = await executeQuery(`select event_member_id_parent, count(event_member_id_parent) as dem
-                                                    from event_group eg 
-                                                    where event_id = ? 
-                                                    group by (event_member_id_parent)`, [id]);
-        if (rowspanMember && rowspanMember.length > 0) {
-        obj.printRowSpan = rowspanMember
-        }; 
-
-        const rowParentSTT = await executeQuery(`SELECT @rownum := @rownum + 1 AS stt, t.event_member_id_parent
-                                                  FROM  (SELECT @rownum := 0) r, 
-                                                        (SELECT DISTINCT event_member_id_parent 
-                                                          FROM event_group 
-                                                          WHERE event_id = ?) t;`, [id]);
-        if (rowParentSTT && rowParentSTT.length > 0) {
-        obj.printrowParentSTT = rowParentSTT
-        }; 
-
-        const rowChildSTT = await executeQuery(`SELECT event_member_id_child, event_member_id,
-                                                       @rownum := IF(event_member_id_child = 0, 1, @rownum + 1) AS stt,
-                                                       event_member_id_parent
-                                                  FROM event_group, (SELECT @rownum := 0) r
-                                                  WHERE event_id = ?
-                                                  ORDER BY event_member_id_parent, event_member_id_child;`, [id]);
-        if (rowChildSTT && rowChildSTT.length > 0) {
-        obj.printrowChildSTT = rowChildSTT
-        }; 
-
-        const resultMember = await executeQuery(`SELECT @rownum := @rownum + 1 AS stt, a.*, b.full_name, c.department_code,
-                                                        DATE_FORMAT(a.date_add_member, '%d/%m/%Y') AS date_add_member_new, 
-                                                        DATE_FORMAT(a.date_deadline_start, '%d/%m/%Y') AS date_deadline_start,
-                                                        DATE_FORMAT(a.date_completed, '%d/%m/%Y') AS date_completed,
-                                                        DATE_FORMAT(DATE_ADD(a.date_deadline_start, INTERVAL (a.deadline) DAY), '%d/%m/%Y') AS date_deadline_end,
-                                                        
-                                                        DAY(a.date_deadline_start) AS date_participant_start,
-                                                        MONTH(a.date_deadline_start) AS month_participant_start,
-                                                        DATE_FORMAT(a.deadline_compare, '%m/%Y') AS month_year_participant_end,
-
-                                                        DAY(a.date_completed) AS date_daycompleted,
-                                                        MONTH(a.date_completed) AS month_completed,
-                                                                                                                
-                                                        DAY(DATE_ADD(a.date_deadline_start, INTERVAL (a.deadline) DAY)) AS date_daydeadline,
-                                                        MONTH(DATE_ADD(a.date_deadline_start, INTERVAL (a.deadline) DAY)) AS month_daydeadline,
-
-                                                        TIMESTAMPDIFF(DAY, CURDATE(), DATE_ADD(date(a.date_deadline_start), INTERVAL a.deadline DAY)) AS deadline_countdown,
-                                                        TIMESTAMPDIFF(DAY, date(a.date_completed),DATE_ADD(date(a.date_deadline_start), INTERVAL a.deadline DAY)) AS compare
-                                                  FROM (SELECT @rownum := 0) r, event_group a, admin_user b, admin_user_department c
-                                                  WHERE a.status = 1 AND b.status = 1
-                                                    AND b.department_id = c.department_id
-                                                    AND a.user_id_member = b.user_id 
-                                                    AND a.event_id=? 
-                                                  ORDER BY a.event_member_id_parent, a.date_add_member`, [id]);
-        if (resultMember && resultMember.length > 0) {
-        obj.printMem = resultMember
-        };  
-
-        const queryKPI = await executeQuery(`SELECT @rownum := @rownum + 1 AS stt, a.*,
-                                                    DATE_FORMAT(a.kpi_date_create, '%d/%m/%Y') AS kpi_date_create,
-                                                    DATE_FORMAT(a.kpi_result_date, '%d/%m/%Y') AS kpi_result_date
-                                                  FROM (SELECT @rownum := 0) r, kpi a
-                                                  WHERE a.kpi_status = 1 AND a.kpi_member_status = 1                                                
-                                                    AND a.kpi_eg_id=? AND a.kpi_member_id in (?)`, [id, user_id_perform]);
-        if (queryKPI && queryKPI.length > 0) {
-              obj.printQueryKPI = queryKPI
-        };    
-
-        const basic_statics = await executeQuery(`SELECT COUNT(mission_completed)
-                                                    FROM event_group eg
-                                                    WHERE event_id = ? and status = 1`, [id]);
-        if (basic_statics && basic_statics.length > 0) {
-              obj.printStatics = basic_statics
-            };
-        
-        const show_icon_edit = await executeQuery(`SELECT user_id_add_member
-                                                    FROM event_group eg
-                                                    WHERE event_id = ? and status = 1 
-                                                                      and user_id_member = ?`, [id, user_id_perform]);
-        if (show_icon_edit && show_icon_edit.length > 0) {
-              obj.printIconEdit = show_icon_edit
-            };
-        
-        const daySum = await executeQuery(`SELECT DAY(LAST_DAY(CURRENT_DATE)) AS days_in_month`);
-        if (daySum && daySum.length > 0) {
-          obj.printdaySum = daySum[0].days_in_month;
-        };
-        const dayCurrent = await executeQuery(`SELECT DAY(CURRENT_DATE) AS current_day`);
-        if (dayCurrent && dayCurrent.length > 0) {
-          obj.printdayCurrent = dayCurrent[0].current_day;
-        };
-        const monthCurrent = await executeQuery(`SELECT MONTH(CURRENT_DATE) AS current_month`);
-        if (monthCurrent && monthCurrent.length > 0) {
-          obj.printmonthCurrent = monthCurrent[0].current_month;
-        };
-        const yearCurrent = await executeQuery(`SELECT YEAR(CURRENT_DATE) AS current_year`);
-        if (yearCurrent && yearCurrent.length > 0) {
-          obj.printyearCurrent = yearCurrent[0].current_year;
-        };
-
-        const { print, ...printTs } = obj;
-
-        res.render('./route-home-show', { obj, print, ...printTs, id, kpi_id,
-                                        basic_statics_completed, basic_statics_Uncompleted, basic_statics_percent, deparment,
-                                        basic_statics_selectA, basic_statics_selectB, basic_statics_selectC, basic_statics_selectD,  
-                                        basic_statics_selectApercent, basic_statics_selectBpercent, basic_statics_selectCpercent, basic_statics_selectDpercent,
-                                        user_id_perform, show_icon_edit,
-                                        user: req.session.user });
-      } catch (err) {
-        console.error(err);
-        res.status(500).send('Internal Server Error');
-      }
-    });
-
-    app.get('/home-show2/:id', requireLogin, notExist, staticsCompleted, async function(req, res) {
-      try {
-        const id = req.params.id;
-        const kpi_id = req.params.id;
-        const months = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"];
-        const obj = { print: null };
-        const user_id_perform = req.session.user.user_id;
-
-        const deparment = req.deparment;
-
-        // Nội dung sự kiện
-        for (const month of months) {
-          const queryMonth = ` SELECT * FROM THANG${month} where id =?` ;
-          const resultMonth = await executeQuery(queryMonth, [id]);
-          obj[`printT${month}`] = resultMonth;
-        }
-        
-        // Nội dung Thành viên tham gia
-        const queries = months.map(month => ({
-          query: `SELECT  a.*, 
-                          DATE_FORMAT(a.date_create, '%d/%m/%Y') AS date_create,
-                          DAY(date_create) AS date_create_number,
-                          MONTH(date_create) AS month_create_number
-                    FROM THANG${month} a WHERE a.id = ?`
-        }));
-
-        for (const { query } of queries) {
-          const result = await executeQuery(query, [id]);
-          if (result && result.length > 0) {
-            obj.print = result;
-          } 
-        }
-
-        const resultMember = await executeQuery(`SELECT @rownum := @rownum + 1 AS stt, a.*, b.full_name, c.department_code,
-                                                        DATE_FORMAT(a.date_add_member, '%d/%m/%Y') AS date_add_member_new, 
-                                                        DATE_FORMAT(a.date_completed, '%d/%m/%Y') AS date_completed,
-                                                        DAY(a.date_completed) AS date_daycompleted,
-                                                        MONTH(a.date_completed) AS month_completed,
-                                                        DATE_FORMAT(a.date_deadline_start, '%d/%m/%Y') AS date_deadline_start,
-                                                        DAY(a.date_deadline_start) AS date_participant_start,
-                                                        MONTH(a.date_deadline_start) AS month_participant_start,
-                                                        DATE_FORMAT(DATE_ADD(a.date_deadline_start, INTERVAL (a.deadline) DAY), '%d/%m/%Y') AS date_deadline_end,
-                                                        TIMESTAMPDIFF(DAY, CURDATE(), DATE_ADD(date(a.date_deadline_start), INTERVAL a.deadline DAY)) AS deadline_countdown,
-                                                        TIMESTAMPDIFF(DAY, date(a.date_completed),DATE_ADD(date(a.date_deadline_start), INTERVAL a.deadline DAY)) AS compare
-                                                  FROM (SELECT @rownum := 0) r, event_group a, admin_user b, admin_user_department c
-                                                  WHERE a.status = 1 AND b.status = 1
-                                                    AND b.department_id = c.department_id
-                                                    AND a.user_id_member = b.user_id 
-                                                    AND a.event_id=?`, [id]);
-        if (resultMember && resultMember.length > 0) {
-              obj.printMem = resultMember
-        }; 
-
-        
-        const daySum = await executeQuery(`SELECT DAY(LAST_DAY(CURRENT_DATE)) AS days_in_month`);
-        if (daySum && daySum.length > 0) {
-          obj.printdaySum = daySum[0].days_in_month;
-        };
-        const dayCurrent = await executeQuery(`SELECT DAY(CURRENT_DATE) AS current_day`);
-        if (dayCurrent && dayCurrent.length > 0) {
-          obj.printdayCurrent = dayCurrent[0].current_day;
-        };
-        const monthCurrent = await executeQuery(`SELECT MONTH(CURRENT_DATE) AS current_month`);
-        if (monthCurrent && monthCurrent.length > 0) {
-          obj.printmonthCurrent = monthCurrent[0].current_month;
-        };
-
-        // async function fetchCurrentDay() {
-        //   const CurrentDayResult = await executeQuery(`SELECT DATE_FORMAT(CONVERT_TZ(DATE(CURRENT_DATE+1), @@session.time_zone, '+00:00'), '%Y-%m-%dT00:00:00.000Z')`);
-          
-        //   if (CurrentDayResult && CurrentDayResult.length > 0) {
-        //       const result = CurrentDayResult[0]; // Lấy giá trị đầu tiên từ mảng kết quả
-        //       const key = Object.keys(result)[0]; // Lấy khóa đầu tiên của đối tượng
-        //       if (result && result[key]) {
-        //           obj.printCurrentday = result[key];
-        //       }
-        //   }
-        //   console.log(obj.printCurrentday);
-        // }
-      
-        // fetchCurrentDay();
-
-        const Currentday = await executeQuery(`SELECT DATE_FORMAT(CONVERT_TZ(DATE(CURRENT_DATE+1), @@session.time_zone, '+00:00'), '%Y-%m-%dT00:00:00.000Z')`);
-        if (Currentday && Currentday.length > 0) {          
-          const result = Currentday[0];
-          const key = Object.keys(result)[0];
-          if (result && result[key]) {
-
-              obj.printCurrentday = result[key]; //c1
-
-              const dateSt = obj.printCurrentday;
-              const dateParts = dateSt.match(/\d+/g);
-              const objDate = new Date(Date.UTC(dateParts[0], dateParts[1] - 1, dateParts[2], dateParts[3], dateParts[4], dateParts[5]));
-              obj.printCurrentday2 = objDate; //c2
-          }
-        };
-        const currentTime = moment();
-        const currentDate = new Date();
-        
-        let z;
-        const startDate = moment(currentTime.format('DD-MM-YYYY'), 'DD-MM-YYYY').startOf('month').toDate();
-        let dateStrArray = [];
-        for (z = 0; z < obj.printdaySum; z++) {
-          const targetDate = new Date(startDate.getTime() + z * 86400000);
-          const day = targetDate.getDate().toString().padStart(2, '0');
-          const month = (targetDate.getMonth() + 1).toString().padStart(2, '0');
-          const year = targetDate.getFullYear();
-          const dateStr = `${day}/${month}/${year}`;
-          dateStrArray.push(dateStr); 
-        }
-        const d1 = new Date(dateStrArray[12].split('/').reverse().join('-')); // Chuyển đổi dateStrArray[1] thành đối tượng Date
-        const date1 = d1.getTime();
-        const date2 = obj.printCurrentday2.getTime();
-
-        const timeDiff = date1 - date1; // Tính sự chênh lệch thời gian
-        const diffDays = Math.ceil(timeDiff / (1000 * 3600 * 24)); // Chia ra số ngày
-        console.log(currentDate);
-        console.log(obj.printCurrentday);
-        console.log(obj.printCurrentday2);
-        console.log(date1);
-        console.log(date2);
-        console.log(timeDiff);
-        console.log(diffDays);
-
-        if (date2 === date1) {
-            console.log("Bằng nhau.");
-        } else {
-            console.log("Trật lấc");
-        };
-
-        const { print, ...printTs } = obj;
-
-        res.render('./route-home-show2', { obj, print, ...printTs, id, kpi_id, deparment,
-                                        user_id_perform, dateStrArray,
-                                        user: req.session.user });
-      } catch (err) {
-        console.error(err);
-        res.status(500).send('Internal Server Error');
-      }
-    });
-
-    app.post('/select/:id', requireLogin, async (req, res) => {
-      const id = req.params.id;
-      const { q, Thang } = req.body;
-      const obj = { print: null };
-    
-      // Sử dụng Prepared Statements để tránh lỗi SQL Injection
-      const query = `SELECT DAY(LAST_DAY(STR_TO_DATE(CONCAT('01', '/', SUBSTRING_INDEX(?, '/', 1), '/', SUBSTRING_INDEX(?, '/', -1)), '%d/%m/%Y'))) AS days_in_month`;
-      
-      const SumSelectedDay = await executeQuery(query, [Thang, Thang]);
-    
-      if (SumSelectedDay && SumSelectedDay.length > 0) {
-        obj.printSumSelectedDay = SumSelectedDay[0].days_in_month;
-      }
-    
-      console.log(Thang, id, SumSelectedDay);
-      res.redirect(`/select/${id}?SumSelectedDay=${obj.printSumSelectedDay}&Thang=${Thang}`);
-    });
-
-    app.get('/select/:id', requireLogin, notExist, staticsCompleted, async function(req, res) {
-      try {
-        const id = req.params.id;
-        const kpi_id = req.params.id;
-        const months = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"];
-        const obj = { print: null };
-        const user_id_perform = req.session.user.user_id;
-        const SumSelectedDay = req.query.SumSelectedDay;
-        var ThangSelected = req.query.Thang;
-        var Thang = req.query.Thang;
-        Thang = parseInt(Thang);
-        const deparment = req.deparment;
-        // console.log(Thang, id, SumSelectedDay);
-        // Nội dung sự kiện
-        for (const month of months) {
-          const queryMonth = ` SELECT * FROM THANG${month} where id =?` ;
-          const resultMonth = await executeQuery(queryMonth, [id]);
-          obj[`printT${month}`] = resultMonth;
-        }
-        
-        // Nội dung Thành viên tham gia
-        const queries = months.map(month => ({
-          query: `SELECT  a.*, 
-                          DATE_FORMAT(a.date_create, '%d/%m/%Y') AS date_create,
-                          DAY(date_create) AS date_create_number,
-                          MONTH(date_create) AS month_create_number,
-                          YEAR(date_create) AS year_create_number,
-                          DATE_FORMAT(date_create, '%m/%Y') AS month_year_start,
-                          DATE_FORMAT(CURRENT_DATE, '%m/%Y') AS month_year_current
-                    FROM THANG${month} a WHERE a.id = ?`
-        }));
-
-        for (const { query } of queries) {
-          const result = await executeQuery(query, [id]);
-          if (result && result.length > 0) {
-            obj.print = result;
-            if (result[0] && typeof result[0].month_create_number !== 'undefined') {
-              const monthCreateNumberType = typeof result[0].month_create_number;
-              // console.log('Kiểu dữ liệu của result.month_create_number:', monthCreateNumberType);
-            }
-          } 
-        }        
-
-        const resultMember = await executeQuery(`SELECT @rownum := @rownum + 1 AS stt, a.*, b.full_name, c.department_code,
-                                                        DATE_FORMAT(a.date_add_member, '%d/%m/%Y') AS date_add_member_new, 
-                                                        DATE_FORMAT(a.date_deadline_start, '%d/%m/%Y') AS date_deadline_start,
-                                                        DATE_FORMAT(a.date_completed, '%d/%m/%Y') AS date_completed,
-                                                        DATE_FORMAT(DATE_ADD(a.date_deadline_start, INTERVAL (a.deadline) DAY), '%d/%m/%Y') AS date_deadline_end,
-                                                        
-                                                        DAY(a.date_deadline_start) AS date_participant_start,
-                                                        MONTH(a.date_deadline_start) AS month_participant_start,
-
-                                                        DAY(a.date_completed) AS date_daycompleted,
-                                                        MONTH(a.date_completed) AS month_completed,
-                                                                                                                
-                                                        DAY(DATE_ADD(a.date_deadline_start, INTERVAL (a.deadline) DAY)) AS date_daydeadline,
-                                                        MONTH(DATE_ADD(a.date_deadline_start, INTERVAL (a.deadline) DAY)) AS month_daydeadline,
-
-                                                        TIMESTAMPDIFF(DAY, CURDATE(), DATE_ADD(date(a.date_deadline_start), INTERVAL a.deadline DAY)) AS deadline_countdown,
-                                                        TIMESTAMPDIFF(DAY, date(a.date_completed),DATE_ADD(date(a.date_deadline_start), INTERVAL a.deadline DAY)) AS compare
-                                                  FROM (SELECT @rownum := 0) r, event_group a, admin_user b, admin_user_department c
-                                                  WHERE a.status = 1 AND b.status = 1
-                                                    AND b.department_id = c.department_id
-                                                    AND a.user_id_member = b.user_id 
-                                                    AND a.event_id=? 
-                                                  ORDER BY a.event_member_id_parent, a.date_add_member`, [id]);
-        if (resultMember && resultMember.length > 0) {
-        obj.printMem = resultMember
-        };  
-
-        const rowspanMember = await executeQuery(`select event_member_id_parent, count(event_member_id_parent) as dem
-                                                    from event_group eg 
-                                                    where event_id = ? 
-                                                    group by (event_member_id_parent)`, [id]);
-        if (rowspanMember && rowspanMember.length > 0) {
-        obj.printRowSpan = rowspanMember
-        }; 
-
-        const rowParentSTT = await executeQuery(`SELECT @rownum := @rownum + 1 AS stt, t.event_member_id_parent
-                                                  FROM  (SELECT @rownum := 0) r, 
-                                                        (SELECT DISTINCT event_member_id_parent 
-                                                          FROM event_group 
-                                                          WHERE event_id = ?) t;`, [id]);
-        if (rowParentSTT && rowParentSTT.length > 0) {
-        obj.printrowParentSTT = rowParentSTT
-        }; 
-
-        const rowChildSTT = await executeQuery(`SELECT event_member_id_child, event_member_id,
-                                                       @rownum := IF(event_member_id_child = 0, 1, @rownum + 1) AS stt,
-                                                       event_member_id_parent
-                                                  FROM event_group, (SELECT @rownum := 0) r
-                                                  WHERE event_id = ?
-                                                  ORDER BY event_member_id_parent, event_member_id_child;`, [id]);
-        if (rowChildSTT && rowChildSTT.length > 0) {
-        obj.printrowChildSTT = rowChildSTT
-        }; 
-        
-        const daySum = await executeQuery(`SELECT DAY(LAST_DAY(CURRENT_DATE)) AS days_in_month`);
-        if (daySum && daySum.length > 0) {
-          obj.printdaySum = daySum[0].days_in_month;
-        };
-        const dayCurrent = await executeQuery(`SELECT DAY(CURRENT_DATE) AS current_day`);
-        if (dayCurrent && dayCurrent.length > 0) {
-          obj.printdayCurrent = dayCurrent[0].current_day;
-        };
-        const monthCurrent = await executeQuery(`SELECT MONTH(CURRENT_DATE) AS current_month`);
-        if (monthCurrent && monthCurrent.length > 0) {
-          obj.printmonthCurrent = monthCurrent[0].current_month;
-        };
-
-        const Currentday = await executeQuery(`SELECT DATE_FORMAT(CONVERT_TZ(DATE(CURRENT_DATE+1), @@session.time_zone, '+00:00'), '%Y-%m-%dT00:00:00.000Z')`);
-        if (Currentday && Currentday.length > 0) {          
-          const result = Currentday[0];
-          const key = Object.keys(result)[0];
-          if (result && result[key]) {
-
-              obj.printCurrentday = result[key]; //c1
-
-              const dateSt = obj.printCurrentday;
-              const dateParts = dateSt.match(/\d+/g);
-              const objDate = new Date(Date.UTC(dateParts[0], dateParts[1] - 1, dateParts[2], dateParts[3], dateParts[4], dateParts[5]));
-              obj.printCurrentday2 = objDate; //c2
-          }
-        };
-        const currentTime = moment();
-        const currentDate = new Date();
-        
-        let z;
-        const startDate = moment(currentTime.format('DD-MM-YYYY'), 'DD-MM-YYYY').startOf('month').toDate();
-        let dateStrArray = [];
-        for (z = 0; z < obj.printdaySum; z++) {
-          const targetDate = new Date(startDate.getTime() + z * 86400000);
-          const day = targetDate.getDate().toString().padStart(2, '0');
-          const month = (targetDate.getMonth() + 1).toString().padStart(2, '0');
-          const year = targetDate.getFullYear();
-          const dateStr = `${day}/${month}/${year}`;
-          dateStrArray.push(dateStr); 
-        }
-        const d1 = new Date(dateStrArray[12].split('/').reverse().join('-')); // Chuyển đổi dateStrArray[1] thành đối tượng Date
-        const date1 = d1.getTime();
-        const date2 = obj.printCurrentday2.getTime();
-
-        const timeDiff = date1 - date1; // Tính sự chênh lệch thời gian
-        const diffDays = Math.ceil(timeDiff / (1000 * 3600 * 24)); // Chia ra số ngày
-        // console.log(currentDate);
-        // console.log(obj.printCurrentday);
-        // console.log(obj.printCurrentday2);
-        // console.log(date1);
-        // console.log(date2);
-        // console.log(timeDiff);
-        // console.log(diffDays);
-        // console.log("Kiểu dữ liệu của Thang là: ",typeof Thang);
-
-        // if (date2 === date1) {
-        //     console.log("Bằng nhau.");
-        // } else {
-        //     console.log("Trật lấc");
-        // };
-
-        const { print, ...printTs } = obj;
-
-        res.render('./route-home-show2', { obj, print, ...printTs, id, kpi_id, deparment, Thang, ThangSelected, SumSelectedDay,
-                                        user_id_perform, dateStrArray,
-                                        user: req.session.user });
-      } catch (err) {
-        console.error(err);
-        res.status(500).send('Internal Server Error');
-      }
-    });
-
-    app.get('/home-show-detail/:id', requireLogin, notExist, staticsCompleted, async function(req, res) {
-      try {
-        const id = req.params.id;
-        const kpi_id = req.params.id;
-        const months = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"];
-        const obj = { print: null };
-        const user_id_perform = req.session.user.user_id;
-        const depart_ID = req.session.user.department_id;
-        
-        const basic_statics_completed = req.basic_statics_completed;
-        const basic_statics_Uncompleted = req.basic_statics_Uncompleted;
-        const basic_statics_percent = req.basic_statics_percent;
-    
-        const basic_statics_selectA = req.basic_statics_selectA;
-        const basic_statics_selectApercent = req.basic_statics_selectApercent;
-        const basic_statics_selectB = req.basic_statics_selectB;
-        const basic_statics_selectBpercent = req.basic_statics_selectBpercent;
-        const basic_statics_selectC = req.basic_statics_selectC;
-        const basic_statics_selectCpercent = req.basic_statics_selectCpercent;
-        const basic_statics_selectD = req.basic_statics_selectD;
-        const basic_statics_selectDpercent = req.basic_statics_selectDpercent;
-    
-        const deparment = req.deparment;
-    
-        // Nội dung sự kiện
-        for (const month of months) {
-          const queryMonth = ` SELECT * FROM THANG${month} where id =?` ;
-          const resultMonth = await executeQuery(queryMonth, [id]);
-          obj[`printT${month}`] = resultMonth;
-        }
-        
-        // Nội dung Thành viên tham gia
-        const queries = months.map(month => ({
-          query: `SELECT a.*, DATE_FORMAT(a.date_create, '%d/%m/%Y') AS date_create
-                    FROM THANG${month} a WHERE a.id = ?`
-        }));
-    
-        for (const { query } of queries) {
-          const result = await executeQuery(query, [id]);
-          if (result && result.length > 0) {
-            obj.print = result;
-          } //else {console.log("Some thing wrong at /home-show/:id" +id)}
-        }
-    
-        const resultMember = await executeQuery(`SELECT @rownum := @rownum + 1 AS stt, a.*, b.full_name, c.department_code,
-                                                        DATE_FORMAT(a.date_add_member, '%d/%m/%Y') AS date_add_member_new, 
-                                                        DATE_FORMAT(a.date_completed, '%d/%m/%Y') AS date_completed,
-                                                        DATE_FORMAT(a.date_deadline_start, '%d/%m/%Y') AS date_deadline_start,
-                                                        DATE_FORMAT(DATE_ADD(a.date_deadline_start, INTERVAL (a.deadline) DAY), '%d/%m/%Y') AS date_deadline_end,
-                                                        TIMESTAMPDIFF(DAY, CURDATE(), DATE_ADD(date(a.date_deadline_start), INTERVAL a.deadline DAY)) AS deadline_countdown,
-                                                        TIMESTAMPDIFF(DAY, date(a.date_completed),DATE_ADD(date(a.date_deadline_start), INTERVAL a.deadline DAY)) AS compare
-                                                  FROM (SELECT @rownum := 0) r, event_group a, admin_user b, admin_user_department c
-                                                  WHERE a.status = 1 AND b.status = 1
-                                                    AND b.department_id = c.department_id
-                                                    AND a.user_id_member = b.user_id 
-                                                    AND a.event_id=?`, [id]);
-        if (resultMember && resultMember.length > 0) {
-              obj.printMem = resultMember
-        };
-    
-        const queryKPI = await executeQuery(`SELECT @rownum := @rownum + 1 AS stt, a.*,
-                                                    DATE_FORMAT(a.kpi_date_create, '%d/%m/%Y') AS kpi_date_create,
-                                                    DATE_FORMAT(a.kpi_result_date, '%d/%m/%Y') AS kpi_result_date
-                                                  FROM (SELECT @rownum := 0) r, kpi a
-                                                  WHERE a.kpi_status = 1 AND a.kpi_member_status = 1                                                
-                                                    AND a.kpi_eg_id=? AND a.kpi_member_id in (?)`, [id, user_id_perform]);
-        if (queryKPI && queryKPI.length > 0) {
-              obj.printQueryKPI = queryKPI
-        };    
-    
-        const basic_statics = await executeQuery(`SELECT COUNT(mission_completed)
-                                                    FROM event_group eg
-                                                    WHERE event_id = ? and status = 1`, [id]);
-        if (basic_statics && basic_statics.length > 0) {
-              obj.printStatics = basic_statics
-            };
-        
-        const show_icon_edit = await executeQuery(`SELECT user_id_add_member
-                                                    FROM event_group eg
-                                                    WHERE event_id = ? and status = 1 
-                                                                       and user_id_member = ?`, [id, user_id_perform]);
-        if (show_icon_edit && show_icon_edit.length > 0) {
-              obj.printIconEdit = show_icon_edit
-            };
-        
-        
-
-        const { print, ...printTs } = obj;
-    
-        res.render('./route-home-show-detail', { obj, print, ...printTs, id, kpi_id,
-                                        basic_statics_completed, basic_statics_Uncompleted, basic_statics_percent, deparment,
-                                        basic_statics_selectA, basic_statics_selectB, basic_statics_selectC, basic_statics_selectD,  
-                                        basic_statics_selectApercent, basic_statics_selectBpercent, basic_statics_selectCpercent, basic_statics_selectDpercent,
-                                        user_id_perform, show_icon_edit, daySum, 
-                                        user: req.session.user });
-      } catch (err) {
-        console.error(err);
-        res.status(500).send('Internal Server Error');
-      }
-    });
-
-    app.get('/add-more-work/:child', async function(req, res) {
-      try {
-        const child = req.params.child;
-        console.log(child);
-
-        const backPage = `select event_id from event_group where event_member_id = ?`;
-        const resultID = await executeQuery(backPage, [child]);
-        const id = resultID[0].event_id;
-        console.log(id);
-
-        const insertTable = `insert into event_group (event_id, event_status, event_name, 
-                                                      event_member_id, 
-                                                      event_style, user_member, user_id_member, user_add_member, user_id_add_member, 
-                                                      date_add_member, 
-                                                      department_id, department_name, status, 
-                                                      event_member_id_child,
-                                                      event_member_id_parent)
-                                              select  event_id, event_status, event_name, 
-                                                      (select max(event_member_id)+1 from event_group), 
-                                                      event_style, user_member, user_id_member, user_add_member, user_id_add_member, 
-                                                      sysdate(),
-                                                      department_id, department_name, status, 
-                                                      (1),
-                                                      event_member_id
-                                              from    event_group
-                                              where   event_member_id = ?`;
-        const resultinsertTable = await executeQuery(insertTable, [child]);
-        console.log("Add work " + id + " is Successful!");
-
-        const updateTable = `UPDATE event_group eg
-                                JOIN (
-                                      SELECT user_id_member, MIN(event_member_id) AS min_event_member_id
-                                      FROM event_group
-                                      WHERE event_id = ?
-                                      GROUP BY user_id_member
-                                    ) temp_table
-                                ON eg.user_id_member = temp_table.user_id_member
-                                SET eg.event_member_id_parent = temp_table.min_event_member_id
-                                WHERE eg.event_id = ?`;
-        const resultupdateTable = await executeQuery(updateTable, [id, id]);                      
-
-        res.redirect('/home-show/' + id);
-        
-      } catch (err) {
-        console.error(err);
-        res.status(500).send('Internal Server Error');
-      }
-    });
-
-app.get('/edit/:id', requireLogin, notExist, notEdit, staticsCompleted, async (req, res) => {
-  try {
-    const id = req.params.id;
-    const months = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"];
-    const obj = { print: null };
-    const user_id_perform = req.session.user.user_id;
-    const depart_ID = req.session.user.department_id;
-    
-    const basic_statics_completed = req.basic_statics_completed;
-    const basic_statics_Uncompleted = req.basic_statics_Uncompleted;
-    const basic_statics_percent = req.basic_statics_percent;
-
-    const basic_statics_selectA = req.basic_statics_selectA;
-    const basic_statics_selectApercent = req.basic_statics_selectApercent;
-
-    const basic_statics_selectB = req.basic_statics_selectB;
-    const basic_statics_selectBpercent = req.basic_statics_selectBpercent;
-
-    const basic_statics_selectC = req.basic_statics_selectC;
-    const basic_statics_selectCpercent = req.basic_statics_selectCpercent;
-
-    const basic_statics_selectD = req.basic_statics_selectD;
-    const basic_statics_selectDpercent = req.basic_statics_selectDpercent;
-    
-    const deparment = req.deparment;
-    // console.log(basic_statics_completed[0]['COUNT(mission_completed)']);
-
-    // Nội dung sự kiện <Header>/ 2024 và <Div> Main-right/ Nội dung Sự kiện:
-    for (const month of months) {
-            const queryMonth = `select  a.*, b.user_id_member 
-                                from thang${month} a, event_group b 
-                                where a.id = b.event_id 
-                                  and b.status = 1 
-                                  and a.status = 1 
-                                  and b.event_member_id_child = 0
-                                  and a.id = ?
-                                  and b.user_id_member in (?)`;
-            const resultMonth = await executeQuery(queryMonth, [id, user_id_perform]);
-            obj[`printT${month}`] = resultMonth;
-    }
-    
-    //<Div> Main-left/ Chỉnh sữa nội dung: 
-    // ---> Thanh <select>/ Thêm thành viên: ID - Full_name  
-    const emp_fullname = `SELECT * FROM admin_user where department_id = ?`;
-    const fullNamesResult = await executeQuery(emp_fullname, [depart_ID]);
-    const fullNames = fullNamesResult.map(result => result.full_name);
-    const memUserID = fullNamesResult.map(result => result.user_id);
-    // ---> Thanh <select>/ Thêm thành viên: ID - Full_name  
-    const emp_fullname2 = `SELECT * FROM admin_user where department_id != ?`;
-    const selectDifirentDepart = await executeQuery(emp_fullname2, [depart_ID]);
-    const selectDD_Fulname = selectDifirentDepart.map(result => result.full_name);
-    const selectDD_ID = selectDifirentDepart.map(result => result.user_id);
-    
-    //Nội dung Thành viên tham gia <Div> Main-right/ Danh sách Thành viên tham gia:
-    const resultMember = await executeQuery(`SELECT @rownum := @rownum + 1 AS stt, a.*, b.full_name, c.department_code,
-                                                    DATE_FORMAT(a.date_add_member, '%d/%m/%Y') AS date_add_member_new, 
-                                                    DATE_FORMAT(a.date_completed, '%d/%m/%Y') AS date_completed,
-                                                    DATE_FORMAT(a.date_deadline_start, '%d/%m/%Y') AS date_deadline_start,
-                                                    DATE_FORMAT(DATE_ADD(a.date_deadline_start, INTERVAL (a.deadline) DAY), '%d/%m/%Y') AS date_deadline_end,
-                                                    TIMESTAMPDIFF(DAY, CURDATE(), DATE_ADD(date(a.date_deadline_start), INTERVAL a.deadline DAY)) AS deadline_countdown,
-                                                    TIMESTAMPDIFF(DAY, date(a.date_completed),DATE_ADD(date(a.date_deadline_start), INTERVAL a.deadline DAY)) AS compare
-                                              FROM (SELECT @rownum := 0) r, event_group a, admin_user b, admin_user_department c
-                                              WHERE a.status = 1 AND b.status = 1
-                                                AND b.department_id = c.department_id
-                                                AND a.user_id_member = b.user_id 
-                                                AND a.event_id = ?`, [id]);
-    if (resultMember && resultMember.length > 0) {
-          obj.printMem = resultMember
-        };
-
-    const basic_statics = await executeQuery(`SELECT COUNT(mission_completed)
-                                                FROM event_group eg
-                                                WHERE event_id = ? and status = 1`, [id]);
-    if (basic_statics && basic_statics.length > 0) {
-          obj.printStatics = basic_statics
-        };
-    
-    const show_icon_edit = await executeQuery(`SELECT user_id_add_member
-                                                FROM event_group eg
-                                                WHERE event_id = ? and status = 1 
-                                                                   and user_id_member = ?`, [id, user_id_perform]);
-    if (show_icon_edit && show_icon_edit.length > 0) {
-          obj.printIconEdit = show_icon_edit
-        };
-    
-        // console.log(basic_statics[0]['COUNT(mission_completed)']);
-
-    //<Div> Main-left/ Chỉnh sữa nội dung: 
-    // ---> <Input>/ Tên sự kiện && Nội dung chi tiết
-    const queries = months.map(month => ({
-      query: `select  a.id,	a.name,	a.detail,	a.status,	a.user_id_create,
-                      DATE_FORMAT(a.date_create, '%d/%m/%Y') AS date_create, 
-                      b.user_id_member 
-              from thang${month} a, event_group b 
-              where a.id = b.event_id 
-                and b.status = 1 
-                and a.status = 1 
-                and a.id = ?
-                and b.user_id_member in (?)`,
-      variable: `dataT${month}`
-    }));
-    for (const { query, variable } of queries) {
-            const result = await executeQuery(query, [id, user_id_perform]);
-            if (result && result.length > 0) {
-              obj.print = result;
-              obj[variable] = {
-                id: result[0].id,
-                name: result[0].name,
-                detail: result[0].detail
-              };
-            } else {
-              obj[variable] = null
-            };
-    }
-    const { print, ...printTs } = obj;
-
-    const duplicateDataMessage = req.query.duplicateDataMessage || null;
-    
-    res.render('./route-edit', { obj, print, ...printTs, id, deparment,
-                                    basic_statics_completed, basic_statics_Uncompleted, basic_statics_percent, 
-                                    basic_statics_selectA, basic_statics_selectB, basic_statics_selectC, basic_statics_selectD, 
-                                    basic_statics_selectApercent, basic_statics_selectBpercent, basic_statics_selectCpercent, basic_statics_selectDpercent,
-                                    fullNames, memUserID, selectDD_Fulname, selectDD_ID,
-                                    user_id_perform, show_icon_edit, duplicateDataMessage, req, 
-                                    user: req.session.user });
-  } catch (err) {
-    console.error(err);
-     // Kiểm tra xem lỗi có phải là "Cannot read properties of null"
-      if (err instanceof TypeError && err.message.includes('Cannot read properties of null')) {
-        res.status(400).send('Invalid data: Cannot read properties of null');
-      } else {
-        res.status(500).send('Internal Server Error');
-      }
-    }
-});
-
-app.post('/update-event-all/(:id)', requireLogin, async(req, res) => {
-  const id = req.params.id;
-  const currentTime = moment();
-  const mysqlTimestamp = currentTime.format('YYYY-MM-DD HH:mm:ss');
-  let date_update = mysqlTimestamp;
-
-  const user_id_perform = req.session.user.user_id;
-
-  const { work_granted, deadline } = req.body;
-
-  const updateEventAll = `UPDATE event_group SET work_granted = ?, deadline = ?, user_id_grant = ?, date_granted = ?, date_deadline_start = ? WHERE event_id = ? and mission_completed = 0`;
-  connection.query(updateEventAll, [work_granted, deadline, user_id_perform, date_update, date_update, id], (err, result) => {
-    if (err) {
-      console.error('Error updateEventAll record: ', err);
-      res.status(500).send('Error updateEventAll record');
-      return;
-    }
-    console.log("updateEventAll is Successful!");
-    res.redirect('/edit/' + id);
-  });
-})
-
-app.post('/update-event-style/(:id)', requireLogin, async(req, res) => {
-  const id = req.params.id;
-  const currentTime = moment();
-  const mysqlTimestamp = currentTime.format('YYYY-MM-DD HH:mm:ss');
-
-  let date_update = mysqlTimestamp;
-  let table;
-  if      (id < 2000) {table = 'THANG01';} 
-  else if (id < 3000) {table = 'THANG02';} 
-  else if (id < 4000) {table = 'THANG03';} 
-  else if (id < 5000) {table = 'THANG04';} 
-  else if (id < 6000) {table = 'THANG05';} 
-  else if (id < 7000) {table = 'THANG06';}
-  else if (id < 8000) {table = 'THANG07';}
-  else if (id < 9000) {table = 'THANG08';} 
-  else if (id < 10000) {table = 'THANG09';}
-  else if (id < 11000) {table = 'THANG10';}
-  else if (id < 12000) {table = 'THANG11';} 
-  else                 {table = 'THANG12';}
-
-  const updateEventStyle = `UPDATE ${table} SET event_style = 1, date_update = ? WHERE id =?`;
-  const process = await executeQuery(`UPDATE event_group SET event_style = 1 WHERE event_id = ?`, [id]);
-
-   connection.query(updateEventStyle, [date_update, id], (err, result) => {
-    if (err) {
-      console.error('Error updateEventStyle record: ', err);
-      res.status(500).send('Error updateEventStyle record');
-      return;
-    }
-    console.log("updateEventStyle is Successful!");
-    res.redirect('/edit/' + id);
-  });
-
-})
-
-app.post('/update/(:id)', requireLogin, (req, res) => {
-  const id = req.params.id;
-  const { name, detail } = req.body;
-  const currentTime = moment();
-  const mysqlTimestamp = currentTime.format('YYYY-MM-DD HH:mm:ss');
-  // console.log(mysqlTimestamp) ;
-  let date_update = mysqlTimestamp;
-  let table;
-
-  if      (id < 2000) {table = 'THANG01';} 
-  else if (id < 3000) {table = 'THANG02';} 
-  else if (id < 4000) {table = 'THANG03';} 
-  else if (id < 5000) {table = 'THANG04';} 
-  else if (id < 6000) {table = 'THANG05';} 
-  else if (id < 7000) {table = 'THANG06';}
-  else if (id < 8000) {table = 'THANG07';}
-  else if (id < 9000) {table = 'THANG08';} 
-  else if (id < 10000) {table = 'THANG09';}
-  else if (id < 11000) {table = 'THANG10';}
-  else if (id < 12000) {table = 'THANG11';} 
-  else                 {table = 'THANG12';}
-
-  const query = `UPDATE ${table} SET name = ?, detail = ?, date_update = ? WHERE id = ?`;
-
-  connection.query(query, [name, detail, date_update, id], (err, result) => {
-    if (err) {
-      console.error('Error updating record: ', err);
-      res.status(500).send('Error updating record');
-      return;
-    }
-    console.log("Edit is Successful!");
-    res.redirect('/edit/' +id);
-  });
-});
-
-app.post('/add/:id', requireLogin, checkDuplicateData, async (req, res) => {
-  try {
-    const id = req.params.id;
-    const duplicateDataMessage = req.duplicateDataMessage;
-    // Thanh select
-    const { user_id, full_name } = JSON.parse(req.body['{"user_id": "", "full_name": ""}']);
-    const decodedFullName = decodeURIComponent(full_name);
-    const currentTime = moment();
-    const mysqlTimestamp = currentTime.format('YYYY-MM-DD HH:mm:ss');
-    const date_create = mysqlTimestamp;
-  
-    // Sử dụng thông tin user_session từ user đăng nhập
-    const user_id_perform = req.session.user.user_id;
-    const user_perform = req.session.user.user_name;
-
-    let table;
-    if      (id < 2000) {table = 'THANG01';} 
-    else if (id < 3000) {table = 'THANG02';} 
-    else if (id < 4000) {table = 'THANG03';} 
-    else if (id < 5000) {table = 'THANG04';} 
-    else if (id < 6000) {table = 'THANG05';} 
-    else if (id < 7000) {table = 'THANG06';}
-    else if (id < 8000) {table = 'THANG07';}
-    else if (id < 9000) {table = 'THANG08';} 
-    else if (id < 10000) {table = 'THANG09';}
-    else if (id < 11000) {table = 'THANG10';}
-    else if (id < 12000) {table = 'THANG11';} 
-    else                 {table = 'THANG12';}
-
-    const process = await executeQuery(`SELECT * FROM ${table} WHERE id = ? AND event_style = 1`, [id]);
-
-    if (process && process.length > 0) {
-        const query = `INSERT INTO event_group (event_id, user_id_member, user_member, date_add_member, user_add_member, user_id_add_member, event_style) 
-                              VALUES (?, ?, ?, ?, ?, ?, 1)`;
-        const result = await executeQuery(query, [id, user_id, decodedFullName, date_create, user_perform, user_id_perform]);
-    }
-    else {
-        const query = `INSERT INTO event_group (event_id, user_id_member, user_member, date_add_member, user_add_member, user_id_add_member) 
-                              VALUES (?, ?, ?, ?, ?, ?)`;
-        const result = await executeQuery(query, [id, user_id, decodedFullName, date_create, user_perform, user_id_perform]);
-    };
-    
-  
-    console.log(`Insert Member into Event ID: ${id}, user_id: ${user_id}, full_name: ${decodedFullName} is Successful!`);
-    res.redirect('/edit/'+id+'?duplicateDataMessage='+encodeURIComponent(duplicateDataMessage));
-  } catch (err) {
-    console.error(err);
-    res.status(500).send('Internal Server Error');
-  }
-});
-
-app.get('/del-member/:eg_id', requireLogin, async (req, res) => {
-  try {
-    var eg_id = req.params.eg_id;
-    const queryID = 'SELECT event_id FROM event_group WHERE event_member_id = ?';
-    const resultID = await executeQuery(queryID, [eg_id]);
-    const event_id = resultID[0].event_id;
-    const currentTime = moment();
-    const mysqlTimestamp = currentTime.format('YYYY-MM-DD HH:mm:ss');
-    const date_delete = mysqlTimestamp;
-  
-    // Sử dụng thông tin user_session từ user đăng nhập
-    const user_id_perform = req.session.user.user_id;
-    const user_perform = req.session.user.user_name;
-
-    const query = 'UPDATE event_group SET status = 0, date_remove = ?, user_remove = ?, user_id_remove = ? WHERE event_member_id =?';
-    const result = await executeQuery(query, [date_delete, user_perform, user_id_perform, eg_id]);
-  
-    console.log(`Delete Member from Event ID: ${eg_id} is Successful!`);
-    res.redirect('/edit/'+event_id);
-  } catch (err) {
-    console.error(err);
-    res.status(500).send('Internal Server Error');
-  }
-});
-
-app.get('/edit-work-granted/:eg_id', requireLogin, staticsCompleted, notEditWorkGranted, async (req, res) => {
-  try {
-    const eg_id = req.params.eg_id;
-    const user_id_perform = req.session.user.user_id;
-    const basic_statics_completed = req.basic_statics_completed;
-    const basic_statics_Uncompleted = req.basic_statics_Uncompleted;
-    const basic_statics_percent = req.basic_statics_percent;
-
-    const basic_statics_selectA = req.basic_statics_selectA;
-    const basic_statics_selectApercent = req.basic_statics_selectApercent;
-    const basic_statics_selectB = req.basic_statics_selectB;
-    const basic_statics_selectBpercent = req.basic_statics_selectBpercent;
-    const basic_statics_selectC = req.basic_statics_selectC;
-    const basic_statics_selectCpercent = req.basic_statics_selectCpercent;
-    const basic_statics_selectD = req.basic_statics_selectD;
-    const basic_statics_selectDpercent = req.basic_statics_selectDpercent;
-
-    const deparment = req.deparment;
-
-    // Lấy phần tử đầu tiên của event_id = id <table - thangXX>
-    const queryID = 'SELECT event_id FROM event_group WHERE event_member_id = ?';
-    const resultID = await executeQuery(queryID, [eg_id]);
-    const id = resultID[0].event_id;
-
-    // Nội dung sự kiện - Phần Header
-    const months = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"];
-    const obj = { print: null };
-    for (const month of months) {
-      const queryMonth = `SELECT * FROM THANG${month} WHERE id = ?`;
-      const resultMonth = await executeQuery(queryMonth, [id]);
-      obj[`printT${month}`] = resultMonth;
-    }
-
-    //<Div> Main-left/ Chỉnh sữa nội dung: 
-    // ---> Thanh <select>/ Thêm thành viên: ID - Full_name  
-    const emp_fullname = `SELECT * FROM admin_user`;
-    const fullNamesResult = await executeQuery(emp_fullname);
-    const fullNames = fullNamesResult.map(result => result.full_name);
-    const memUserID = fullNamesResult.map(result => result.user_id);
-    
-    //Nội dung Thành viên tham gia <Div> Main-right/ Danh sách Thành viên tham gia:
-    const resultMember = await executeQuery(`SELECT @rownum := @rownum + 1 AS stt, a.*, b.full_name, c.department_code,
-                                                    DATE_FORMAT(a.date_add_member, '%d/%m/%Y') AS date_add_member_new, 
-                                                    DATE_FORMAT(a.date_completed, '%d/%m/%Y') AS date_completed,
-                                                    DATE_FORMAT(a.date_deadline_start, '%d/%m/%Y') AS date_deadline_start,
-                                                    DATE_FORMAT(DATE_ADD(a.date_deadline_start, INTERVAL (a.deadline) DAY), '%d/%m/%Y') AS date_deadline_end,
-                                                    TIMESTAMPDIFF(DAY, CURDATE(), DATE_ADD(date(a.date_deadline_start), INTERVAL a.deadline DAY)) AS deadline_countdown,
-                                                    TIMESTAMPDIFF(DAY, date(a.date_completed),DATE_ADD(date(a.date_deadline_start), INTERVAL a.deadline DAY)) AS compare
-                                              FROM (SELECT @rownum := 0) r, event_group a, admin_user b, admin_user_department c
-                                              WHERE a.status = 1 AND b.status = 1
-                                                AND b.department_id = c.department_id
-                                                AND a.user_id_member = b.user_id 
-                                                AND a.event_id=?`, [id]);
-    if (resultMember && resultMember.length > 0) {
-          obj.printMem = resultMember
-        };
-
-    const basic_statics = await executeQuery(`SELECT COUNT(mission_completed)
-                                                FROM event_group eg
-                                                WHERE event_id = ? and status = 1`, [id]);
-    if (basic_statics && basic_statics.length > 0) {
-          obj.printStatics = basic_statics
-        };
-
-    const show_icon_edit = await executeQuery(`SELECT user_id_add_member
-                                                FROM event_group eg
-                                                WHERE event_id = ? and status = 1 
-                                                                   and user_id_member = ?`, [id, user_id_perform]);
-    if (show_icon_edit && show_icon_edit.length > 0) {
-          obj.printIconEdit = show_icon_edit
-        };
-    
-    const updateMEM = 'SELECT event_member_id FROM event_group WHERE event_member_id = ?';
-    const resultUpdateMEM = await executeQuery(updateMEM, [eg_id]);
-    const result =  resultUpdateMEM[0].event_group_id;
-
-    
-    //event_user_grant, event_user_perform
-    const queries = months.map(month => ({
-      query: `select  a.*, a.user_id_create,
-                      DATE_FORMAT(a.date_create, '%d/%m/%Y') AS date_create, 
-                      b.*
-              from thang${month} a, event_group b 
-              where a.id = b.event_id 
-                and b.status = 1 
-                and a.status = 1 
-                AND event_member_id = ?`,
-      variable: `dataT${month}`
-    }));
-    
-    for (const { query, variable } of queries) {
-      const result = await executeQuery(query, [eg_id]);
-      if (result && result.length > 0) {
-        obj.print = result;
-        obj[variable] = {
-          eg_id: result[0].eg_id,
-          user_member: result[0].user_member,
-          work_granted: result[0].work_granted,
-          deadline: result[0].deadline
-        };
-      } else {
-        obj[variable] = null;}
-    }
-    const { print, ...printTs } = obj;
-
-    res.render('./route-edit-work-granted', { obj, print, ...printTs, eg_id: eg_id, id, basic_statics_completed, basic_statics_Uncompleted, basic_statics_percent, deparment,
-                                              basic_statics_selectA, basic_statics_selectB, basic_statics_selectC, basic_statics_selectD,     
-                                              basic_statics_selectApercent, basic_statics_selectBpercent, basic_statics_selectCpercent, basic_statics_selectDpercent,                                    
-                                              fullNames, memUserID, 
-                                              user_id_perform, show_icon_edit,
-                                              user: req.session.user });
-  } catch (err) {
-    console.error(err);
-    res.status(500).send('Internal Server Error');
-  }
-});
-
-app.post('/update-work-granted/(:eg_id)', requireLogin, async (req, res) => {
-  var eg_id = req.params.eg_id;
-  const { work_granted, deadline } = req.body;
-
-  const queryID = 'SELECT event_id FROM event_group WHERE event_member_id = ?';
-  const resultID = await executeQuery(queryID, [eg_id]);
-  const id = resultID[0].event_id;
-
-  const currentTime = moment();
-  const mysqlTimestamp = currentTime.format('YYYY-MM-DD HH:mm:ss');
-  
-  let date_update = mysqlTimestamp;
-
-  const user_id_perform = req.session.user.user_id;
-  const user_perform = req.session.user.user_name;
-
-  const query = `UPDATE event_group SET work_granted = ?, date_update_granted = ?, user_grant = ?, user_id_grant = ?
-                                  WHERE event_member_id = ?`;
-
-  connection.query(query, [work_granted, date_update, user_perform, user_id_perform, eg_id], (err, result) => {
-    if (err) {
-      console.error('Error updating record: ', err);
-      res.status(500).send('Error updating record');
-      return;
-    }
-    console.log("Edit work-grant to member is Successful!: " +eg_id);
-    res.redirect('/home-show/'+id);
-  });
-});
-
-app.post('/update-work-deadline-granted/(:eg_id)', requireLogin, async (req, res) => {
-  var eg_id = req.params.eg_id;
-  const { deadline } = req.body;
-
-  const queryID = 'SELECT event_id FROM event_group WHERE event_member_id = ?';
-  const resultID = await executeQuery(queryID, [eg_id]);
-  const id = resultID[0].event_id;
-
-  const currentTime = moment();
-  const mysqlTimestamp = currentTime.format('YYYY-MM-DD HH:mm:ss');
-  
-  let date_update = mysqlTimestamp;
-
-  const query = `UPDATE event_group SET deadline = ?, date_deadline_start = ?, 
-                                        deadline_compare = DATE_ADD(date_deadline_start, INTERVAL ? DAY)
-                                  WHERE event_member_id = ?`;
-
-  connection.query(query, [deadline, date_update, deadline, eg_id], (err, result) => {
-    if (err) {
-      console.error('Error updating record: ', err);
-      res.status(500).send('Error updating record');
-      return;
-    }
-    console.log("Edit deadline-grantd to member is Successful!: " +eg_id);
-    res.redirect('/home-show/'+id);
-  });
-});
-
-app.get('/edit-work-report/:eg_id', requireLogin, staticsCompleted, notEditWorkreport,  async (req, res) => {
-  try {
-    const eg_id = req.params.eg_id;
-    const user_id_perform = req.session.user.user_id;
-    const basic_statics_completed = req.basic_statics_completed;
-    const basic_statics_Uncompleted = req.basic_statics_Uncompleted;
-    const basic_statics_percent = req.basic_statics_percent;
-
-    const basic_statics_selectA = req.basic_statics_selectA;
-    const basic_statics_selectApercent = req.basic_statics_selectApercent;
-    const basic_statics_selectB = req.basic_statics_selectB;
-    const basic_statics_selectBpercent = req.basic_statics_selectBpercent;
-    const basic_statics_selectC = req.basic_statics_selectC;
-    const basic_statics_selectCpercent = req.basic_statics_selectCpercent;
-    const basic_statics_selectD = req.basic_statics_selectD;
-    const basic_statics_selectDpercent = req.basic_statics_selectDpercent;
-
-    const deparment = req.deparment;
-
-    const queryID = 'SELECT event_id FROM event_group WHERE event_member_id = ?';
-    const resultID = await executeQuery(queryID, [eg_id]);
-    const id = resultID[0].event_id;
-
-    const months = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"];
-    const obj = { print: null };
-
-    for (const month of months) {
-      const queryMonth = `SELECT * FROM THANG${month} WHERE id = ?`;
-      const resultMonth = await executeQuery(queryMonth, [id]);
-      obj[`printT${month}`] = resultMonth;
-    }
-
-    const emp_fullname = `SELECT * FROM admin_user`;
-    const fullNamesResult = await executeQuery(emp_fullname);
-    const fullNames = fullNamesResult.map(result => result.full_name);
-    const memUserID = fullNamesResult.map(result => result.user_id);
-    
-
-    const resultMember = await executeQuery(`SELECT @rownum := @rownum + 1 AS stt, a.*, b.full_name, c.department_code,
-                                                    DATE_FORMAT(a.date_add_member, '%d/%m/%Y') AS date_add_member_new, 
-                                                    DATE_FORMAT(a.date_completed, '%d/%m/%Y') AS date_completed,
-                                                    DATE_FORMAT(a.date_deadline_start, '%d/%m/%Y') AS date_deadline_start,
-                                                    DATE_FORMAT(DATE_ADD(a.date_deadline_start, INTERVAL (a.deadline) DAY), '%d/%m/%Y') AS date_deadline_end,
-                                                    TIMESTAMPDIFF(DAY, CURDATE(), DATE_ADD(date(a.date_deadline_start), INTERVAL a.deadline DAY)) AS deadline_countdown,
-                                                    TIMESTAMPDIFF(DAY, date(a.date_completed),DATE_ADD(date(a.date_deadline_start), INTERVAL a.deadline DAY)) AS compare
-                                              FROM (SELECT @rownum := 0) r, event_group a, admin_user b, admin_user_department c
-                                              WHERE a.status = 1 AND b.status = 1
-                                                AND b.department_id = c.department_id
-                                                AND a.user_id_member = b.user_id 
-                                                AND a.event_id=?`, [id]);
-    if (resultMember && resultMember.length > 0) {
-          obj.printMem = resultMember
-        };
-
-    const basic_statics = await executeQuery(`SELECT COUNT(mission_completed)
-                                                FROM event_group eg
-                                                WHERE event_id = ? and status = 1`, [id]);
-    if (basic_statics && basic_statics.length > 0) {
-          obj.printStatics = basic_statics
-        };
-    
-    const show_icon_edit = await executeQuery(`SELECT user_id_add_member
-                                                FROM event_group eg
-                                                WHERE event_id = ? and status = 1 
-                                                                   and user_id_member = ?`, [id, user_id_perform]);
-    if (show_icon_edit && show_icon_edit.length > 0) {
-          obj.printIconEdit = show_icon_edit
-        };
-
-    const updateMEM = 'SELECT event_member_id FROM event_group WHERE event_member_id = ?';
-    const resultUpdateMEM = await executeQuery(updateMEM, [eg_id]);
-    const result =  resultUpdateMEM[0].event_group_id;
-
-    //
-    const queries = months.map(month => ({
-      query: `SELECT a.*, DATE_FORMAT(a.date_create, '%d/%m/%Y') AS date_create, 
-                     b.* 
-              FROM thang${month} a, event_group b
-              WHERE a.id = b.event_id
-                AND a.status = 1 
-                AND b.status = 1
-                AND event_member_id = ?`,
-      variable: `dataT${month}`
-      
-    }));
-
-    for (const { query, variable } of queries) {
-      const result = await executeQuery(query, [eg_id]);
-      if (result && result.length > 0) {
-        obj.print = result;
-        obj[variable] = {
-          eg_id: result[0].eg_id,
-          work_report: result[0].work_report,
-          user_member: result[0].user_member,
-        };
-      } else {
-        obj[variable] = null;}
-    }
-
-    const { print, ...printTs } = obj;
-    res.render('./route-edit-work-report', { obj, print, ...printTs, eg_id: eg_id, id, basic_statics_completed, basic_statics_Uncompleted, basic_statics_percent, deparment,
-                                              basic_statics_selectA, basic_statics_selectB, basic_statics_selectC, basic_statics_selectD,    
-                                              basic_statics_selectApercent, basic_statics_selectBpercent, basic_statics_selectCpercent, basic_statics_selectDpercent,                                      
-                                              fullNames, memUserID, 
-                                              user_id_perform, show_icon_edit,
-                                              user: req.session.user });
-  } catch (err) {
-    console.error(err);
-    res.status(500).send('Internal Server Error');
-  }
-});
-
-app.post('/update-work-report/(:eg_id)', requireLogin, async (req, res) => {
-  var eg_id = req.params.eg_id;
-  const { work_report } = req.body;
-
-  const queryID = 'SELECT event_id FROM event_group WHERE event_member_id = ?';
-  const resultID = await executeQuery(queryID, [eg_id]);
-  const id = resultID[0].event_id;
-
-  const currentTime = moment();
-  const mysqlTimestamp = currentTime.format('YYYY-MM-DD HH:mm:ss');
-  // console.log(mysqlTimestamp) ;
-  let date_update = mysqlTimestamp;
-
-  const user_id_perform = req.session.user.user_id;
-  const user_perform  = req.session.user.user_name;
-
-  const query = `UPDATE event_group SET work_report = ?, date_report = ?,  
-                                        user_report = ?, user_id_report = ? 
-                                  WHERE event_member_id = ?`;
-
-  connection.query(query, [ work_report, date_update, user_perform, user_id_perform, eg_id], (err, result) => {
-    if (err) {
-      console.error('Error updating record: ', err);
-      res.status(500).send('Error updating record');
-      return;
-    }
-    console.log("Edit Work Report to member is Successful!: " +eg_id);
-    res.redirect('/home-show/'+id);
-  });
-});
-
-app.get('/work-report-completed/:eg_id', requireLogin, async (req, res) => {
-  try {
-    var eg_id = req.params.eg_id;
-    const queryID = 'SELECT event_id FROM event_group WHERE event_member_id = ?';
-    const resultID = await executeQuery(queryID, [eg_id]);
-    const event_id = resultID[0].event_id;
-    const currentTime = moment();
-    const mysqlTimestamp = currentTime.format('YYYY-MM-DD HH:mm:ss');
-    const date_completed = mysqlTimestamp;
-  
-    const user_id_completed = req.session.user.user_id;
-    const user_completed = req.session.user.user_name;
-
-    const query = 'UPDATE event_group SET mission_completed = 1, date_completed = ?, user_completed = ?, user_id_completed = ? WHERE event_member_id =?';
-    const result = await executeQuery(query, [date_completed, user_completed, user_id_completed, eg_id]);
-  
-    console.log(`Work report completed from Event ID: ${eg_id} is Successful!`);
-    res.redirect('/home-show/'+event_id);
-  } catch (err) {
-    console.error(err);
-    res.status(500).send('Internal Server Error');
-  }
-});
-
-app.get('/work-report-completed-a/:eg_id', requireLogin, async (req, res) => {
-  try {
-    var eg_id = req.params.eg_id;
-    const queryID = 'SELECT event_id FROM event_group WHERE event_member_id = ?';
-    const resultID = await executeQuery(queryID, [eg_id]);
-    const event_id = resultID[0].event_id;
-    const currentTime = moment();
-    const mysqlTimestamp = currentTime.format('YYYY-MM-DD HH:mm:ss');
-    const date_completed = mysqlTimestamp;
-  
-    const user_id_completed = req.session.user.user_id;
-    const user_completed = req.session.user.user_name;
-
-    const query = 'UPDATE event_group SET mission_completed = 2, date_completed = ?, user_completed = ?, user_id_completed = ? WHERE event_member_id =?';
-    const result = await executeQuery(query, [date_completed, user_completed, user_id_completed, eg_id]);
-  
-    console.log(`Work report completed from Event ID: ${eg_id} choose A is Successful!`);
-    res.redirect('/home-show/'+event_id);
-  } catch (err) {
-    console.error(err);
-    res.status(500).send('Internal Server Error');
-  }
-});
-
-app.get('/work-report-completed-b/:eg_id', requireLogin, async (req, res) => {
-  try {
-    var eg_id = req.params.eg_id;
-    const queryID = 'SELECT event_id FROM event_group WHERE event_member_id = ?';
-    const resultID = await executeQuery(queryID, [eg_id]);
-    const event_id = resultID[0].event_id;
-    const currentTime = moment();
-    const mysqlTimestamp = currentTime.format('YYYY-MM-DD HH:mm:ss');
-    const date_completed = mysqlTimestamp;
-  
-    const user_id_completed = req.session.user.user_id;
-    const user_completed = req.session.user.user_name;
-
-    const query = 'UPDATE event_group SET mission_completed = 3, date_completed = ?, user_completed = ?, user_id_completed = ? WHERE event_member_id =?';
-    const result = await executeQuery(query, [date_completed, user_completed, user_id_completed, eg_id]);
-  
-    console.log(`Work report completed from Event ID: ${eg_id} choose B is Successful!`);
-    res.redirect('/home-show/'+event_id);
-  } catch (err) {
-    console.error(err);
-    res.status(500).send('Internal Server Error');
-  }
-});
-
-app.get('/work-report-completed-c/:eg_id', requireLogin, async (req, res) => {
-  try {
-    var eg_id = req.params.eg_id;
-    const queryID = 'SELECT event_id FROM event_group WHERE event_member_id = ?';
-    const resultID = await executeQuery(queryID, [eg_id]);
-    const event_id = resultID[0].event_id;
-    const currentTime = moment();
-    const mysqlTimestamp = currentTime.format('YYYY-MM-DD HH:mm:ss');
-    const date_completed = mysqlTimestamp;
-  
-    const user_id_completed = req.session.user.user_id;
-    const user_completed = req.session.user.user_name;
-
-    const query = 'UPDATE event_group SET mission_completed = 4, date_completed = ?, user_completed = ?, user_id_completed = ? WHERE event_member_id =?';
-    const result = await executeQuery(query, [date_completed, user_completed, user_id_completed, eg_id]);
-  
-    console.log(`Work report completed from Event ID: ${eg_id} choose C is Successful!`);
-    res.redirect('/home-show/'+event_id);
-  } catch (err) {
-    console.error(err);
-    res.status(500).send('Internal Server Error');
-  }
-});
-
-app.get('/work-report-completed-d/:eg_id', requireLogin, async (req, res) => {
-  try {
-    var eg_id = req.params.eg_id;
-    const queryID = 'SELECT event_id FROM event_group WHERE event_member_id = ?';
-    const resultID = await executeQuery(queryID, [eg_id]);
-    const event_id = resultID[0].event_id;
-    const currentTime = moment();
-    const mysqlTimestamp = currentTime.format('YYYY-MM-DD HH:mm:ss');
-    const date_completed = mysqlTimestamp;
-  
-    const user_id_completed = req.session.user.user_id;
-    const user_completed = req.session.user.user_name;
-
-    const query = 'UPDATE event_group SET mission_completed = 5, date_completed = ?, user_completed = ?, user_id_completed = ? WHERE event_member_id =?';
-    const result = await executeQuery(query, [date_completed, user_completed, user_id_completed, eg_id]);
-  
-    console.log(`Work report completed from Event ID: ${eg_id} choose D is Successful!`);
-    res.redirect('/home-show/'+event_id);
-  } catch (err) {
-    console.error(err);
-    res.status(500).send('Internal Server Error');
-  }
-});
-
-app.get('/work-report-modify/:eg_id', requireLogin, async (req, res) => {
-  try {
-    var eg_id = req.params.eg_id;
-    const queryID = 'SELECT event_id FROM event_group WHERE event_member_id = ?';
-    const resultID = await executeQuery(queryID, [eg_id]);
-    const event_id = resultID[0].event_id;
-    const currentTime = moment();
-    const mysqlTimestamp = currentTime.format('YYYY-MM-DD HH:mm:ss');
-    const date_modify = mysqlTimestamp;
-  
-    const user_id_modify = req.session.user.user_id;
-    const user_modify = req.session.user.user_name;
-
-    const query = 'UPDATE event_group SET mission_completed = 0, date_granted = ?, user_update_grant = ?, user_id_update_grant = ? WHERE event_member_id =?';
-    const result = await executeQuery(query, [date_modify, user_modify, user_id_modify, eg_id]);
-  
-    console.log(`Work report Uncompleted from Event ID: ${eg_id} is Successful!`);
-    res.redirect('/home-show/'+event_id);
-  } catch (err) {
-    console.error(err);
-    res.status(500).send('Internal Server Error');
-  }
-});
-
-app.get('/add-kpi/', requireLogin, async function(req, res){
-  const id = req.query.id;
-  const currentTime = moment();
-  const mysqlTimestamp = currentTime.format('YYYY-MM-DD HH:mm:ss');
-  let date_create = mysqlTimestamp;
-  
-  const user_id = req.session.user.user_id;
-  const user = req.session.user.user_name;
-
-  connection.query(`insert into kpi (kpi_eg_id, kpi_id_child, kpi_date_create, kpi_member_id, kpi_member, kpi_member_date_add, kpi_member_status) values(?, (SELECT MAX(b.KPI_ID)+1 FROM KPI b), ?, ?, ?, ?, 1) `,
-                                        [id, date_create, user_id, user, date_create], function(err){
-    if(!!err) {console.log("error", +err);}
-    else{
-      console.log("Insert into KPI is Successful!");
-      res.redirect('/home-show/' + id);
-    }
-  }); 
-})
-
-  app.get('/add-kpi-child/', requireLogin, async function(req, res){
-    const kpi_id = req.query.kpi_id;
-    const currentTime = moment();
-    const mysqlTimestamp = currentTime.format('YYYY-MM-DD HH:mm:ss');
-    let date_create = mysqlTimestamp;
-    
-    const user_id = req.session.user.user_id;
-    const user = req.session.user.user_name;
-
-    connection.query(`insert into kpi (kpi_id_child, kpi_date_create, kpi_member_id, kpi_member, kpi_member_date_add, kpi_member_status) 
-                                values(?, ?, ?, ?, ?, 1) `,
-                                          [kpi_id, date_create, user_id, user, date_create], function(err){
-      if(!!err) {console.log("error", +err);}
-      else{
-        console.log("Insert into child KPI " + kpi_id + " is Successful!");
-        res.redirect('/edit-kpi/' + kpi_id);
-      }
-    }); 
-  })
-
-app.get('/delete-kpi/:kpi_id', requireLogin, async function(req, res){
-  const kpi_id = req.params.kpi_id;
-  const currentTime = moment();
-  const mysqlTimestamp = currentTime.format('YYYY-MM-DD HH:mm:ss');
-  let date_create = mysqlTimestamp;
-  
-  const user_id = req.session.user.user_id;
-  const user = req.session.user.user_name;
-
-  const queryKPI_eg_id = 'SELECT kpi_eg_id FROM kpi WHERE kpi_id = ?';
-  const result_queryKPI_eg_id = await executeQuery(queryKPI_eg_id, [kpi_id]);
-  const KPI_eg_id = result_queryKPI_eg_id[0].kpi_eg_id;
-
-  connection.query(`UPDATE kpi 
-                        SET kpi_status = 0, kpi_member_date_remove = ?, kpi_member_id_remove = ?, kpi_member_remove = ? 
-                        WHERE kpi_id_child = ?`, [date_create, user_id, user, kpi_id], function(err){
-    if(!!err) {console.log("error", +err);}
-    else{
-      console.log("Delete KPI " + kpi_id + " is Successful!");
-      res.redirect('/home-show/' + KPI_eg_id);
-    }
-  }); 
-})
-
-app.get('/edit-kpi/:kpi_id_child', requireLogin, async function(req, res) {
-  try {
-    const kpi_id_child = req.params.kpi_id_child;
-    
-    const obj = { print: null };
-    const user_id_perform = req.session.user.user_id;
-    
-    const queryKPI = await executeQuery(`SELECT @rownum := @rownum + 1 AS stt, a.*,
-                                                DATE_FORMAT(a.kpi_date_create, '%H:%m:%s %d/%m/%Y') AS kpi_date_create,
-                                                DATE_FORMAT(a.kpi_result_date, '%H:%m:%s %d/%m/%Y') AS kpi_result_date
-                                              FROM (SELECT @rownum := 0) r, kpi a
-                                              WHERE a.kpi_status = 1 AND a.kpi_member_status = 1                                                
-                                                AND (a.kpi_id_child=? or a.kpi_id = ?) AND a.kpi_member_id in (?)`, [kpi_id_child, kpi_id_child, user_id_perform]);
-    if (queryKPI && queryKPI.length > 0) {
-          obj.print = queryKPI};    
-    
-    const { print } = obj;
-
-    const queryKPI_eg_id = 'SELECT kpi_eg_id FROM kpi WHERE kpi_id = ? AND kpi_id = (SELECT MIN(b.kpi_id) FROM kpi b WHERE b.kpi_id_child = ?)';
-    const result_queryKPI_eg_id = await executeQuery(queryKPI_eg_id, [kpi_id_child, kpi_id_child]);
-    const KPI_eg_id = result_queryKPI_eg_id[0].kpi_eg_id;
-
-    const kpi_id = queryKPI.kpi_id;
-    
-    res.render('./route-edit-kpi', { obj, print, kpi_id_child, user_id_perform, user: req.session.user, KPI_eg_id, kpi_id });
-  } catch (err) {
-      console.error(err);
-      res.status(500).send('Internal Server Error');
-    }
-});
-
-app.post('/update-kpi', requireLogin, async(req, res) => {
-    const { kpi_id, kpi_name, kpi_plan, kpi_result} = req.body;    
-    const currentTime = moment();
-    const date_update = currentTime.format('YYYY-MM-DD HH:mm:ss');    
-
-    const queryKPI_id_child = 'SELECT kpi_id_child FROM kpi WHERE kpi_id = ?';
-    const result_queryKPI_id_child = await executeQuery(queryKPI_id_child, [kpi_id]);
-    const KPI_id_child = result_queryKPI_id_child[0].kpi_id_child;
-    
-    const queryUpdate = `UPDATE kpi SET kpi_name = ?, kpi_plan = ?, kpi_result = ?, kpi_result_date = ? WHERE kpi_id = ?`;
-
-    connection.query(queryUpdate, [kpi_name, kpi_plan, kpi_result, date_update, kpi_id], (err, result) => {
-      if (err) {
-        console.error('Error updating record: ', err);
-        res.status(500).send('Error updating record');
-        return;
-      }
-      console.log("Edit KPI " + kpi_id + " is Successful!");
-      res.redirect('/edit-kpi/' + KPI_id_child);
-    });
-  });
-
-
-// ------------------------------- API THANG ---------------------------------//
-// Table: THANG01 //
-//----------------//
-app.get('/add-thang01', requireLogin, function(req, res){
-  const currentTime = moment();
-  const mysqlTimestamp = currentTime.format('YYYY-MM-DD HH:mm:ss');
-  let date_create = mysqlTimestamp;
-
-  
-  const user_id_perform = req.session.user.user_id;
-  const user_perform = req.session.user.user_name;
-
-  connection.query(`insert into THANG01 (date_create, user_create, user_id_create) values(?, ?, ?) `,
-                                        [date_create, user_perform, user_id_perform], function(err){
-    if(!!err) {console.log("error", +err);}
-    else{
-      console.log("Insert into Thang01 is Successful!");
-      res.redirect('/add-thang01-member-original');
-      //res.json({"data":"Data Inserted Successfully!"});
-    }
-  }); 
-})
-
-app.get('/add-thang01-member-original', requireLogin, function(req, res) {
-  connection.query('SELECT MAX(id) AS max_id FROM thang01', function(err, rows) {
-    if (err) {
-      console.log('Error:', err);
-      return;
-    }
-
-    const event_id_member = rows[0].max_id;
-    const currentTime = moment().format('YYYY-MM-DD HH:mm:ss');
-    const event_user_id_perform = req.session.user.user_id;
-    const event_user_perform = req.session.user.user_name;
-    
-
-    const query = `INSERT INTO event_group (event_id, 
-                                            user_id_member, user_member, date_add_member, role) 
-                                            VALUES (?, ?, ?, ?, 1)`;
-
-    connection.query(query, [event_id_member, event_user_id_perform, event_user_perform, currentTime], function(err) {
-      if (err) {
-        console.log('Error:', err);
-        return;
-      }
-
-      console.log('Insert into Thang01 is successful!');
-      res.redirect('/home');
-    });
-  });
-});
-
-app.get('/del-thang01/(:id)', requireLogin, function(req, res){
-  var id = req.params.id;
-  const currentTime = moment();
-  const mysqlTimestamp = currentTime.format('YYYY-MM-DD HH:mm:ss');
-  let date_delete = mysqlTimestamp;
-  const user_id_delete = req.session.user.user_id;
-  const user_delete = req.session.user.user_name;
-  
-      connection.query(`update THANG01 a join EVENT_GROUP b 
-                          on a.id = b.event_id
-                          set a.status = 0, b.event_status = 0, a.date_delete = ?, b.date_remove = ?, b.user_remove = ?, b.user_id_remove = ?
-                          where a.id =? `, [date_delete, date_delete, user_delete, user_id_delete, id], function(err){
-        if(!!err){
-          console.log("error", +err);
-          res.redirect('/home')}
-        else{
-          console.log("Delete id "+ id +" is Successful!");
-          return res.redirect('/home')}
-      });
-})
-
-app.get('/show-thang01', requireLogin, async function(req, res) {
-  try {
-    const Thang = 'Tháng 01';
-    const id = req.params.id;
-    const obj = { print: null };
-    const months = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"];
-    const user_id_operation = req.session.user.user_id;
-    
-      const results = await executeQuery(`SELECT @rownum := @rownum + 1 AS stt, a.*, DATE_FORMAT(a.date_create, '%d/%m/%Y') AS date_create_new, b.user_id_member 
-                                          FROM (SELECT @rownum := 0) r, thang01 a, event_group b 
-                                          WHERE a.id = b.event_id 
-                                            and a.status = 1
-                                            and b.status = 1 
-                                            and b.event_member_id_child = 0
-                                            and year(a.date_create) = year(sysdate())
-                                            AND b.user_id_member in (?)`, [user_id_operation]);
-      obj.print = results;
-    
-    for (const month of months) {
-      const resultT = await executeQuery(`SELECT a.*, b.user_id_member 
-                                          FROM thang${month} a, event_group b 
-                                          WHERE a.id = b.event_id 
-                                            AND b.status = 1 AND b.event_member_id_child = 0
-                                            AND a.status = 1 
-                                            AND b.user_id_member in (?)`, [user_id_operation]);
-      obj[`printT${month}`] = resultT;
-    }
-
-    const show_icon_edit = await executeQuery(`SELECT user_id_add_member
-                                                FROM event_group eg
-                                                WHERE event_id < 2000 and status = 1 
-                                                                   and user_id_member = ?`, [user_id_operation]);
-    if (show_icon_edit && show_icon_edit.length > 0) {
-          obj.printIconEdit = show_icon_edit;
-        };
-
-    const { print, ...printTs } = obj;
-
-    
-    res.render('./route-show-thangXX', { obj, print, ...printTs, id, Thang,
-                                        user_id_operation, show_icon_edit,
-                                        user: req.session.user });
-                                       
-  } catch (err) {
-    console.error(err);
-    res.status(500).send('Internal Server Error');
-  }
-});
-
-
-
-
-// Table: THANG02 //
-//----------------//
-app.get('/add-thang02', requireLogin, function(req, res){
-  const currentTime = moment();
-  const mysqlTimestamp = currentTime.format('YYYY-MM-DD HH:mm:ss');
-  let date_create = mysqlTimestamp;
-
-  
-  const user_id_perform = req.session.user.user_id;
-  const user_perform = req.session.user.user_name;
-
-  connection.query(`insert into THANG02 (date_create, user_create, user_id_create) values(?, ?, ?) `,
-                                        [date_create, user_perform, user_id_perform], function(err){
-    if(!!err) {console.log("error", +err);}
-    else{
-      console.log("Insert into Thang02 is Successful!");
-      res.redirect('/add-thang02-member-original');
-      //res.json({"data":"Data Inserted Successfully!"});
-    }
-  }); 
-})
-
-app.get('/add-thang02-member-original', requireLogin, function(req, res) {
-  connection.query('SELECT MAX(id) AS max_id FROM thang02', function(err, rows) {
-    if (err) {
-      console.log('Error:', err);
-      return;
-    }
-
-    const event_id_member = rows[0].max_id;
-    const currentTime = moment().format('YYYY-MM-DD HH:mm:ss');
-    const event_user_id_perform = req.session.user.user_id;
-    const event_user_perform = req.session.user.user_name;
-    
-
-    const query = `INSERT INTO event_group (event_id, 
-                                            user_id_member, user_member, date_add_member, role) 
-                                            VALUES (?, ?, ?, ?, 1)`;
-
-    connection.query(query, [event_id_member, event_user_id_perform, event_user_perform, currentTime], function(err) {
-      if (err) {
-        console.log('Error:', err);
-        return;
-      }
-
-      console.log('Insert into Thang02 is successful!');
-      res.redirect('/home');
-    });
-  });
-});
-
-app.get('/del-thang02/(:id)', requireLogin, function(req, res){
-  var id = req.params.id;
-  const currentTime = moment();
-  const mysqlTimestamp = currentTime.format('YYYY-MM-DD HH:mm:ss');
-  let date_delete = mysqlTimestamp;
-  const user_id_delete = req.session.user.user_id;
-  const user_delete = req.session.user.user_name;
-  
-      connection.query(`update THANG02 a join EVENT_GROUP b 
-                          on a.id = b.event_id
-                          set a.status = 0, b.event_status = 0, a.date_delete = ?, b.date_remove = ?, b.user_remove = ?, b.user_id_remove = ?
-                          where a.id =? `, [date_delete, date_delete, user_delete, user_id_delete, id], function(err){
-        if(!!err){
-          console.log("error", +err);
-          res.redirect('/home')}
-        else{
-          console.log("Delete id "+ id +" is Successful!");
-          return res.redirect('/home')}
-      });
-})
-
-app.get('/show-thang02', requireLogin, async function(req, res) {
-  try {
-    const Thang = 'Tháng 02';
-    const obj = { print: null };
-    const months = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"];
-    const user_id_operation = req.session.user.user_id;
-    
-      const results = await executeQuery(`SELECT @rownum := @rownum + 1 AS stt, a.*, DATE_FORMAT(a.date_create, '%d/%m/%Y') AS date_create_new, b.user_id_member 
-                                          FROM (SELECT @rownum := 0) r, thang02 a, event_group b 
-                                          WHERE a.id = b.event_id 
-                                            and a.status = 1
-                                            and b.status = 1 
-                                            and b.event_member_id_child = 0
-                                            and year(a.date_create) = year(sysdate())
-                                            AND b.user_id_member in (?)`, [user_id_operation]);
-      obj.print = results;
-    
-    
-    for (const month of months) {
-      const resultT = await executeQuery(`SELECT a.*, b.user_id_member 
-                                          FROM thang${month} a, event_group b 
-                                          WHERE a.id = b.event_id 
-                                            AND b.status = 1 AND b.event_member_id_child = 0
-                                            AND a.status = 1 
-                                            AND b.user_id_member in (?)`, [user_id_operation]);
-      obj[`printT${month}`] = resultT;
-    }
-
-    const show_icon_edit = await executeQuery(`SELECT user_id_add_member
-                                                FROM event_group eg
-                                                WHERE event_id >= 2000 and event_id < 3000
-                                                                       and status = 1 
-                                                                       and user_id_member = ?`, [user_id_operation]);
-    if (show_icon_edit && show_icon_edit.length > 0) {
-          obj.printIconEdit = show_icon_edit
-        };
-
-    const { print, ...printTs } = obj;
-
-    
-    res.render('./route-show-thangXX', { obj, print, ...printTs, Thang,
-                                        user_id_operation, show_icon_edit,
-                                        user: req.session.user });
-  } catch (err) {
-    console.error(err);
-    res.status(500).send('Internal Server Error');
-  }
-});
-
-// Table: THANG03 //
-//----------------//
-app.get('/add-thang03', requireLogin, function(req, res){
-  const currentTime = moment();
-  const mysqlTimestamp = currentTime.format('YYYY-MM-DD HH:mm:ss');
-  let date_create = mysqlTimestamp;
-
-  
-  const user_id_perform = req.session.user.user_id;
-  const user_perform = req.session.user.user_name;
-
-  connection.query(`insert into THANG03 (date_create, user_create, user_id_create) values(?, ?, ?) `,
-                                        [date_create, user_perform, user_id_perform], function(err){
-    if(!!err) {console.log("error", +err);}
-    else{
-      console.log("Insert into Thang03 is Successful!");
-      res.redirect('/add-thang03-member-original');
-      //res.json({"data":"Data Inserted Successfully!"});
-    }
-  }); 
-})
-
-app.get('/add-thang03-member-original', requireLogin, function(req, res) {
-  connection.query('SELECT MAX(id) AS max_id FROM thang03', function(err, rows) {
-    if (err) {
-      console.log('Error:', err);
-      return;
-    }
-
-    const event_id_member = rows[0].max_id;
-    const currentTime = moment().format('YYYY-MM-DD HH:mm:ss');
-    const event_user_id_perform = req.session.user.user_id;
-    const event_user_perform = req.session.user.user_name;
-    
-
-    const query = `INSERT INTO event_group (event_id, 
-                                            user_id_member, user_member, date_add_member, role) 
-                                            VALUES (?, ?, ?, ?, 1)`;
-
-    connection.query(query, [event_id_member, event_user_id_perform, event_user_perform, currentTime], function(err) {
-      if (err) {
-        console.log('Error:', err);
-        return;
-      }
-
-      console.log('Insert into Thang03 is successful!');
-      res.redirect('/home');
-    });
-  });
-});
-
-app.get('/del-thang03/(:id)', requireLogin, function(req, res){
-  var id = req.params.id;
-  const currentTime = moment();
-  const mysqlTimestamp = currentTime.format('YYYY-MM-DD HH:mm:ss');
-  let date_delete = mysqlTimestamp;
-  const user_id_delete = req.session.user.user_id;
-  const user_delete = req.session.user.user_name;
-  
-      connection.query(`update THANG03 a join EVENT_GROUP b 
-                          on a.id = b.event_id
-                          set a.status = 0, b.event_status = 0, a.date_delete = ?, b.date_remove = ?, b.user_remove = ?, b.user_id_remove = ?
-                          where a.id =? `, [date_delete, date_delete, user_delete, user_id_delete, id], function(err){
-        if(!!err){
-          console.log("error", +err);
-          res.redirect('/home')}
-        else{
-          console.log("Delete id "+ id +" is Successful!");
-          return res.redirect('/home')}
-      });
-})
-
-app.get('/show-thang03', requireLogin, async function(req, res) {
-  try {
-    const Thang = 'Tháng 03';
-    const obj = { print: null };
-    const months = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"];
-    const user_id_operation = req.session.user.user_id;
-    
-      const results = await executeQuery(`SELECT @rownum := @rownum + 1 AS stt, a.*, DATE_FORMAT(a.date_create, '%d/%m/%Y') AS date_create_new, b.user_id_member 
-                                          FROM (SELECT @rownum := 0) r, thang03 a, event_group b 
-                                          WHERE a.id = b.event_id 
-                                            and a.status = 1
-                                            and b.status = 1 
-                                            and b.event_member_id_child = 0
-                                            and year(a.date_create) = year(sysdate())
-                                            AND b.user_id_member in (?)`, [user_id_operation]);
-      obj.print = results;
-    
-    
-    for (const month of months) {
-      const resultT = await executeQuery(`SELECT a.*, b.user_id_member 
-                                          FROM thang${month} a, event_group b 
-                                          WHERE a.id = b.event_id 
-                                            AND b.status = 1 AND b.event_member_id_child = 0
-                                            AND a.status = 1 
-                                            AND b.user_id_member in (?)`, [user_id_operation]);
-      obj[`printT${month}`] = resultT;
-    }
-
-    const print = [];
-
-    res.render("./route-show-thangXX", { Thang, obj: obj, print: print, user_id_operation: user_id_operation, user: req.session.user });
-  } catch (err) {
-    console.error(err);
-    res.status(500).send('Internal Server Error');
-  }
-});
-
-// Table: THANG04 //
-//----------------//
-app.get('/add-thang04', requireLogin, function(req, res){
-  const currentTime = moment();
-  const mysqlTimestamp = currentTime.format('YYYY-MM-DD HH:mm:ss');
-  let date_create = mysqlTimestamp;
-
-  
-  const user_id_perform = req.session.user.user_id;
-  const user_perform = req.session.user.user_name;
-
-  connection.query(`insert into THANG04 (date_create, user_create, user_id_create) values(?, ?, ?) `,
-                                        [date_create, user_perform, user_id_perform], function(err){
-    if(!!err) {console.log("error", +err);}
-    else{
-      console.log("Insert into Thang04 is Successful!");
-      res.redirect('/add-thang04-member-original');
-      //res.json({"data":"Data Inserted Successfully!"});
-    }
-  }); 
-})
-
-app.get('/add-thang04-member-original', requireLogin, function(req, res) {
-  connection.query('SELECT MAX(id) AS max_id FROM thang04', function(err, rows) {
-    if (err) {
-      console.log('Error:', err);
-      return;
-    }
-
-    const event_id_member = rows[0].max_id;
-    const currentTime = moment().format('YYYY-MM-DD HH:mm:ss');
-    const event_user_id_perform = req.session.user.user_id;
-    const event_user_perform = req.session.user.user_name;
-    
-
-    const query = `INSERT INTO event_group (event_id, 
-                                            user_id_member, user_member, date_add_member, role) 
-                                            VALUES (?, ?, ?, ?, 1)`;
-
-    connection.query(query, [event_id_member, event_user_id_perform, event_user_perform, currentTime], function(err) {
-      if (err) {
-        console.log('Error:', err);
-        return;
-      }
-
-      console.log('Insert into Thang04 is successful!');
-      res.redirect('/home');
-    });
-  });
-});
-
-app.get('/del-thang04/(:id)', requireLogin, function(req, res){
-  var id = req.params.id;
-  const currentTime = moment();
-  const mysqlTimestamp = currentTime.format('YYYY-MM-DD HH:mm:ss');
-  let date_delete = mysqlTimestamp;
-  const user_id_delete = req.session.user.user_id;
-  const user_delete = req.session.user.user_name;
-  
-      connection.query(`update THANG04 a join EVENT_GROUP b 
-                          on a.id = b.event_id
-                          set a.status = 0, b.event_status = 0, a.date_delete = ?, b.date_remove = ?, b.user_remove = ?, b.user_id_remove = ?
-                          where a.id =? `, [date_delete, date_delete, user_delete, user_id_delete, id], function(err){
-        if(!!err){
-          console.log("error", +err);
-          res.redirect('/home')}
-        else{
-          console.log("Delete id "+ id +" is Successful!");
-          return res.redirect('/home')}
-      });
-})
-
-app.get('/show-thang04', requireLogin, async function(req, res) {
-  try {
-    const Thang = 'Tháng 04';
-    const obj = { print: null };
-    const months = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"];
-    const user_id_operation = req.session.user.user_id;
-    
-      const results = await executeQuery(`SELECT @rownum := @rownum + 1 AS stt, a.*, DATE_FORMAT(a.date_create, '%d/%m/%Y') AS date_create_new, b.user_id_member 
-                                          FROM (SELECT @rownum := 0) r, thang04 a, event_group b 
-                                          WHERE a.id = b.event_id 
-                                            and a.status = 1
-                                            and b.status = 1 
-                                            and b.event_member_id_child = 0
-                                            and year(a.date_create) = year(sysdate())
-                                            AND b.user_id_member in (?)`, [user_id_operation]);
-      obj.print = results;
-    
-    
-    for (const month of months) {
-      const resultT = await executeQuery(`SELECT a.*, b.user_id_member 
-                                          FROM thang${month} a, event_group b 
-                                          WHERE a.id = b.event_id 
-                                            AND b.status = 1 AND b.event_member_id_child = 0
-                                            AND a.status = 1 
-                                            AND b.user_id_member in (?)`, [user_id_operation]);
-      obj[`printT${month}`] = resultT;
-    }
-
-    const print = [];
-
-    res.render("./route-show-thangXX", { Thang, obj: obj, print: print, user_id_operation: user_id_operation, user: req.session.user });
-  } catch (err) {
-    console.error(err);
-    res.status(500).send('Internal Server Error');
-  }
-});
-
-// Table: THANG05 //
-//----------------//
-app.get('/add-thang05', requireLogin, function(req, res){
-  const currentTime = moment();
-  const mysqlTimestamp = currentTime.format('YYYY-MM-DD HH:mm:ss');
-  let date_create = mysqlTimestamp;
-
-  
-  const user_id_perform = req.session.user.user_id;
-  const user_perform = req.session.user.user_name;
-
-  connection.query(`insert into thang05 (date_create, user_create, user_id_create) values(?, ?, ?) `,
-                                        [date_create, user_perform, user_id_perform], function(err){
-    if(!!err) {console.log("error", +err);}
-    else{
-      console.log("Insert into thang05 is Successful!");
-      res.redirect('/add-thang05-member-original');
-      //res.json({"data":"Data Inserted Successfully!"});
-    }
-  }); 
-})
-
-app.get('/add-thang05-member-original', requireLogin, function(req, res) {
-  connection.query('SELECT MAX(id) AS max_id FROM thang05', function(err, rows) {
-    if (err) {
-      console.log('Error:', err);
-      return;
-    }
-
-    const event_id_member = rows[0].max_id;
-    const currentTime = moment().format('YYYY-MM-DD HH:mm:ss');
-    const event_user_id_perform = req.session.user.user_id;
-    const event_user_perform = req.session.user.user_name;
-    
-
-    const query = `INSERT INTO event_group (event_id, 
-                                            user_id_member, user_member, date_add_member, role) 
-                                            VALUES (?, ?, ?, ?, 1)`;
-
-    connection.query(query, [event_id_member, event_user_id_perform, event_user_perform, currentTime], function(err) {
-      if (err) {
-        console.log('Error:', err);
-        return;
-      }
-
-      console.log('Insert into thang05 is successful!');
-      res.redirect('/home');
-    });
-  });
-});
-
-app.get('/del-thang05/(:id)', requireLogin, function(req, res){
-  var id = req.params.id;
-  const currentTime = moment();
-  const mysqlTimestamp = currentTime.format('YYYY-MM-DD HH:mm:ss');
-  let date_delete = mysqlTimestamp;
-  const user_id_delete = req.session.user.user_id;
-  const user_delete = req.session.user.user_name;
-  
-      connection.query(`update thang05 a join EVENT_GROUP b 
-                          on a.id = b.event_id
-                          set a.status = 0, b.event_status = 0, a.date_delete = ?, b.date_remove = ?, b.user_remove = ?, b.user_id_remove = ?
-                          where a.id =? `, [date_delete, date_delete, user_delete, user_id_delete, id], function(err){
-        if(!!err){
-          console.log("error", +err);
-          res.redirect('/home')}
-        else{
-          console.log("Delete id "+ id +" is Successful!");
-          return res.redirect('/home')}
-      });
-})
-
-app.get('/show-thang05', requireLogin, async function(req, res) {
-  try {
-    const Thang = 'Tháng 05';
-    const obj = { print: null };
-    const months = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"];
-    const user_id_operation = req.session.user.user_id;
-    
-      const results = await executeQuery(`SELECT @rownum := @rownum + 1 AS stt, a.*, DATE_FORMAT(a.date_create, '%d/%m/%Y') AS date_create_new, b.user_id_member 
-                                          FROM (SELECT @rownum := 0) r, thang05 a, event_group b 
-                                          WHERE a.id = b.event_id 
-                                            and a.status = 1
-                                            and b.status = 1 
-                                            and b.event_member_id_child = 0
-                                            and year(a.date_create) = year(sysdate())
-                                            AND b.user_id_member in (?)`, [user_id_operation]);
-      obj.print = results;
-    
-    
-    for (const month of months) {
-      const resultT = await executeQuery(`SELECT a.*, b.user_id_member 
-                                          FROM thang${month} a, event_group b 
-                                          WHERE a.id = b.event_id 
-                                            AND b.status = 1 AND b.event_member_id_child = 0
-                                            AND a.status = 1 
-                                            AND b.user_id_member in (?)`, [user_id_operation]);
-      obj[`printT${month}`] = resultT;
-    }
-
-    const print = [];
-
-    res.render("./route-show-thangXX", { Thang, obj: obj, print: print, user_id_operation: user_id_operation, user: req.session.user });
-  } catch (err) {
-    console.error(err);
-    res.status(500).send('Internal Server Error');
-  }
-});
-
-// Table: THANG06 //
-//----------------//
-app.get('/add-thang06', requireLogin, function(req, res){
-  const currentTime = moment();
-  const mysqlTimestamp = currentTime.format('YYYY-MM-DD HH:mm:ss');
-  let date_create = mysqlTimestamp;
-
-  
-  const user_id_perform = req.session.user.user_id;
-  const user_perform = req.session.user.user_name;
-
-  connection.query(`insert into thang06 (date_create, user_create, user_id_create) values(?, ?, ?) `,
-                                        [date_create, user_perform, user_id_perform], function(err){
-    if(!!err) {console.log("error", +err);}
-    else{
-      console.log("Insert into thang06 is Successful!");
-      res.redirect('/add-thang06-member-original');
-      //res.json({"data":"Data Inserted Successfully!"});
-    }
-  }); 
-})
-
-app.get('/add-thang06-member-original', requireLogin, function(req, res) {
-  connection.query('SELECT MAX(id) AS max_id FROM thang06', function(err, rows) {
-    if (err) {
-      console.log('Error:', err);
-      return;
-    }
-
-    const event_id_member = rows[0].max_id;
-    const currentTime = moment().format('YYYY-MM-DD HH:mm:ss');
-    const event_user_id_perform = req.session.user.user_id;
-    const event_user_perform = req.session.user.user_name;
-    
-
-    const query = `INSERT INTO event_group (event_id, 
-                                            user_id_member, user_member, date_add_member, role) 
-                                            VALUES (?, ?, ?, ?, 1)`;
-
-    connection.query(query, [event_id_member, event_user_id_perform, event_user_perform, currentTime], function(err) {
-      if (err) {
-        console.log('Error:', err);
-        return;
-      }
-
-      console.log('Insert into thang06 is successful!');
-      res.redirect('/home');
-    });
-  });
-});
-
-app.get('/del-thang06/(:id)', requireLogin, function(req, res){
-  var id = req.params.id;
-  const currentTime = moment();
-  const mysqlTimestamp = currentTime.format('YYYY-MM-DD HH:mm:ss');
-  let date_delete = mysqlTimestamp;
-  const user_id_delete = req.session.user.user_id;
-  const user_delete = req.session.user.user_name;
-  
-      connection.query(`update thang06 a join EVENT_GROUP b 
-                          on a.id = b.event_id
-                          set a.status = 0, b.event_status = 0, a.date_delete = ?, b.date_remove = ?, b.user_remove = ?, b.user_id_remove = ?
-                          where a.id =? `, [date_delete, date_delete, user_delete, user_id_delete, id], function(err){
-        if(!!err){
-          console.log("error", +err);
-          res.redirect('/home')}
-        else{
-          console.log("Delete id "+ id +" is Successful!");
-          return res.redirect('/home')}
-      });
-})
-
-app.get('/show-thang06', requireLogin, async function(req, res) {
-  try {
-    const Thang = 'Tháng 06';
-    const obj = { print: null };
-    const months = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"];
-    const user_id_operation = req.session.user.user_id;
-    
-      const results = await executeQuery(`SELECT @rownum := @rownum + 1 AS stt, a.*, DATE_FORMAT(a.date_create, '%d/%m/%Y') AS date_create_new, b.user_id_member 
-                                          FROM (SELECT @rownum := 0) r, thang06 a, event_group b 
-                                          WHERE a.id = b.event_id 
-                                            and a.status = 1
-                                            and b.status = 1 
-                                            and b.event_member_id_child = 0
-                                            and year(a.date_create) = year(sysdate())
-                                            AND b.user_id_member in (?)`, [user_id_operation]);
-      obj.print = results;
-    
-    
-    for (const month of months) {
-      const resultT = await executeQuery(`SELECT a.*, b.user_id_member 
-                                          FROM thang${month} a, event_group b 
-                                          WHERE a.id = b.event_id 
-                                            AND b.status = 1 AND b.event_member_id_child = 0
-                                            AND a.status = 1 
-                                            AND b.user_id_member in (?)`, [user_id_operation]);
-      obj[`printT${month}`] = resultT;
-    }
-
-    const print = [];
-
-    res.render("./route-show-thangXX", { Thang, obj: obj, print: print, user_id_operation: user_id_operation, user: req.session.user });
-  } catch (err) {
-    console.error(err);
-    res.status(500).send('Internal Server Error');
-  }
-});
-
-// Table: THANG07 //
-//----------------//
-app.get('/add-thang07', requireLogin, function(req, res){
-  const currentTime = moment();
-  const mysqlTimestamp = currentTime.format('YYYY-MM-DD HH:mm:ss');
-  let date_create = mysqlTimestamp;
-
-  
-  const user_id_perform = req.session.user.user_id;
-  const user_perform = req.session.user.user_name;
-
-  connection.query(`insert into thang07 (date_create, user_create, user_id_create) values(?, ?, ?) `,
-                                        [date_create, user_perform, user_id_perform], function(err){
-    if(!!err) {console.log("error", +err);}
-    else{
-      console.log("Insert into thang07 is Successful!");
-      res.redirect('/add-thang07-member-original');
-      //res.json({"data":"Data Inserted Successfully!"});
-    }
-  }); 
-})
-
-app.get('/add-thang07-member-original', requireLogin, function(req, res) {
-  connection.query('SELECT MAX(id) AS max_id FROM thang07', function(err, rows) {
-    if (err) {
-      console.log('Error:', err);
-      return;
-    }
-
-    const event_id_member = rows[0].max_id;
-    const currentTime = moment().format('YYYY-MM-DD HH:mm:ss');
-    const event_user_id_perform = req.session.user.user_id;
-    const event_user_perform = req.session.user.user_name;
-    
-
-    const query = `INSERT INTO event_group (event_id, 
-                                            user_id_member, user_member, date_add_member, role) 
-                                            VALUES (?, ?, ?, ?, 1)`;
-
-    connection.query(query, [event_id_member, event_user_id_perform, event_user_perform, currentTime], function(err) {
-      if (err) {
-        console.log('Error:', err);
-        return;
-      }
-
-      console.log('Insert into thang07 is successful!');
-      res.redirect('/home');
-    });
-  });
-});
-
-app.get('/del-thang07/(:id)', requireLogin, function(req, res){
-  var id = req.params.id;
-  const currentTime = moment();
-  const mysqlTimestamp = currentTime.format('YYYY-MM-DD HH:mm:ss');
-  let date_delete = mysqlTimestamp;
-  const user_id_delete = req.session.user.user_id;
-  const user_delete = req.session.user.user_name;
-  
-      connection.query(`update thang07 a join EVENT_GROUP b 
-                          on a.id = b.event_id
-                          set a.status = 0, b.event_status = 0, a.date_delete = ?, b.date_remove = ?, b.user_remove = ?, b.user_id_remove = ?
-                          where a.id =? `, [date_delete, date_delete, user_delete, user_id_delete, id], function(err){
-        if(!!err){
-          console.log("error", +err);
-          res.redirect('/home')}
-        else{
-          console.log("Delete id "+ id +" is Successful!");
-          return res.redirect('/home')}
-      });
-})
-
-app.get('/show-thang07', requireLogin, async function(req, res) {
-  try {
-    const Thang = 'Tháng 07';
-    const obj = { print: null };
-    const months = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"];
-    const user_id_operation = req.session.user.user_id;
-    
-      const results = await executeQuery(`SELECT @rownum := @rownum + 1 AS stt, a.*, DATE_FORMAT(a.date_create, '%d/%m/%Y') AS date_create_new, b.user_id_member 
-                                          FROM (SELECT @rownum := 0) r, thang07 a, event_group b 
-                                          WHERE a.id = b.event_id 
-                                            and a.status = 1
-                                            and b.status = 1 
-                                            and b.event_member_id_child = 0
-                                            and year(a.date_create) = year(sysdate())
-                                            AND b.user_id_member in (?)`, [user_id_operation]);
-      obj.print = results;
-    
-    
-    for (const month of months) {
-      const resultT = await executeQuery(`SELECT a.*, b.user_id_member 
-                                          FROM thang${month} a, event_group b 
-                                          WHERE a.id = b.event_id 
-                                            AND b.status = 1 AND b.event_member_id_child = 0
-                                            AND a.status = 1 
-                                            AND b.user_id_member in (?)`, [user_id_operation]);
-      obj[`printT${month}`] = resultT;
-    }
-
-    const print = [];
-
-    res.render("./route-show-thangXX", { Thang, obj: obj, print: print, user_id_operation: user_id_operation, user: req.session.user });
-  } catch (err) {
-    console.error(err);
-    res.status(500).send('Internal Server Error');
-  }
-});
-
-// Table: THANG08 //
-//----------------//
-app.get('/add-thang08', requireLogin, function(req, res){
-  const currentTime = moment();
-  const mysqlTimestamp = currentTime.format('YYYY-MM-DD HH:mm:ss');
-  let date_create = mysqlTimestamp;
-
-  
-  const user_id_perform = req.session.user.user_id;
-  const user_perform = req.session.user.user_name;
-
-  connection.query(`insert into thang08 (date_create, user_create, user_id_create) values(?, ?, ?) `,
-                                        [date_create, user_perform, user_id_perform], function(err){
-    if(!!err) {console.log("error", +err);}
-    else{
-      console.log("Insert into thang08 is Successful!");
-      res.redirect('/add-thang08-member-original');
-      //res.json({"data":"Data Inserted Successfully!"});
-    }
-  }); 
-})
-
-app.get('/add-thang08-member-original', requireLogin, function(req, res) {
-  connection.query('SELECT MAX(id) AS max_id FROM thang08', function(err, rows) {
-    if (err) {
-      console.log('Error:', err);
-      return;
-    }
-
-    const event_id_member = rows[0].max_id;
-    const currentTime = moment().format('YYYY-MM-DD HH:mm:ss');
-    const event_user_id_perform = req.session.user.user_id;
-    const event_user_perform = req.session.user.user_name;
-    
-
-    const query = `INSERT INTO event_group (event_id, 
-                                            user_id_member, user_member, date_add_member, role) 
-                                            VALUES (?, ?, ?, ?, 1)`;
-
-    connection.query(query, [event_id_member, event_user_id_perform, event_user_perform, currentTime], function(err) {
-      if (err) {
-        console.log('Error:', err);
-        return;
-      }
-
-      console.log('Insert into thang08 is successful!');
-      res.redirect('/home');
-    });
-  });
-});
-
-app.get('/del-thang08/(:id)', requireLogin, function(req, res){
-  var id = req.params.id;
-  const currentTime = moment();
-  const mysqlTimestamp = currentTime.format('YYYY-MM-DD HH:mm:ss');
-  let date_delete = mysqlTimestamp;
-  const user_id_delete = req.session.user.user_id;
-  const user_delete = req.session.user.user_name;
-  
-      connection.query(`update thang08 a join EVENT_GROUP b 
-                          on a.id = b.event_id
-                          set a.status = 0, b.event_status = 0, a.date_delete = ?, b.date_remove = ?, b.user_remove = ?, b.user_id_remove = ?
-                          where a.id =? `, [date_delete, date_delete, user_delete, user_id_delete, id], function(err){
-        if(!!err){
-          console.log("error", +err);
-          res.redirect('/home')}
-        else{
-          console.log("Delete id "+ id +" is Successful!");
-          return res.redirect('/home')}
-      });
-})
-
-app.get('/show-thang08', requireLogin, async function(req, res) {
-  try {
-    const Thang = 'Tháng 08';
-    const obj = { print: null };
-    const months = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"];
-    const user_id_operation = req.session.user.user_id;
-    
-      const results = await executeQuery(`SELECT @rownum := @rownum + 1 AS stt, a.*, DATE_FORMAT(a.date_create, '%d/%m/%Y') AS date_create_new, b.user_id_member 
-                                          FROM (SELECT @rownum := 0) r, thang08 a, event_group b 
-                                          WHERE a.id = b.event_id 
-                                            and a.status = 1
-                                            and b.status = 1 
-                                            and b.event_member_id_child = 0
-                                            and year(a.date_create) = year(sysdate())
-                                            AND b.user_id_member in (?)`, [user_id_operation]);
-      obj.print = results;
-    
-    
-    for (const month of months) {
-      const resultT = await executeQuery(`SELECT a.*, b.user_id_member 
-                                          FROM thang${month} a, event_group b 
-                                          WHERE a.id = b.event_id 
-                                            AND b.status = 1 AND b.event_member_id_child = 0
-                                            AND a.status = 1 
-                                            AND b.user_id_member in (?)`, [user_id_operation]);
-      obj[`printT${month}`] = resultT;
-    }
-
-    const print = [];
-
-    res.render("./route-show-thangXX", { Thang, obj: obj, print: print, user_id_operation: user_id_operation, user: req.session.user });
-  } catch (err) {
-    console.error(err);
-    res.status(500).send('Internal Server Error');
-  }
-});
-
-// Table: THANG09 //
-//----------------//
-app.get('/add-thang09', requireLogin, function(req, res){
-  const currentTime = moment();
-  const mysqlTimestamp = currentTime.format('YYYY-MM-DD HH:mm:ss');
-  let date_create = mysqlTimestamp;
-
-  
-  const user_id_perform = req.session.user.user_id;
-  const user_perform = req.session.user.user_name;
-
-  connection.query(`insert into thang09 (date_create, user_create, user_id_create) values(?, ?, ?) `,
-                                        [date_create, user_perform, user_id_perform], function(err){
-    if(!!err) {console.log("error", +err);}
-    else{
-      console.log("Insert into thang09 is Successful!");
-      res.redirect('/add-thang09-member-original');
-      //res.json({"data":"Data Inserted Successfully!"});
-    }
-  }); 
-})
-
-app.get('/add-thang09-member-original', requireLogin, function(req, res) {
-  connection.query('SELECT MAX(id) AS max_id FROM thang09', function(err, rows) {
-    if (err) {
-      console.log('Error:', err);
-      return;
-    }
-
-    const event_id_member = rows[0].max_id;
-    const currentTime = moment().format('YYYY-MM-DD HH:mm:ss');
-    const event_user_id_perform = req.session.user.user_id;
-    const event_user_perform = req.session.user.user_name;
-    
-
-    const query = `INSERT INTO event_group (event_id, 
-                                            user_id_member, user_member, date_add_member, role) 
-                                            VALUES (?, ?, ?, ?, 1)`;
-
-    connection.query(query, [event_id_member, event_user_id_perform, event_user_perform, currentTime], function(err) {
-      if (err) {
-        console.log('Error:', err);
-        return;
-      }
-
-      console.log('Insert into thang09 is successful!');
-      res.redirect('/home');
-    });
-  });
-});
-
-app.get('/del-thang09/(:id)', requireLogin, function(req, res){
-  var id = req.params.id;
-  const currentTime = moment();
-  const mysqlTimestamp = currentTime.format('YYYY-MM-DD HH:mm:ss');
-  let date_delete = mysqlTimestamp;
-  const user_id_delete = req.session.user.user_id;
-  const user_delete = req.session.user.user_name;
-  
-      connection.query(`update thang09 a join EVENT_GROUP b 
-                          on a.id = b.event_id
-                          set a.status = 0, b.event_status = 0, a.date_delete = ?, b.date_remove = ?, b.user_remove = ?, b.user_id_remove = ?
-                          where a.id =? `, [date_delete, date_delete, user_delete, user_id_delete, id], function(err){
-        if(!!err){
-          console.log("error", +err);
-          res.redirect('/home')}
-        else{
-          console.log("Delete id "+ id +" is Successful!");
-          return res.redirect('/home')}
-      });
-})
-
-app.get('/show-thang09', requireLogin, async function(req, res) {
-  try {
-    const Thang = 'Tháng 09';
-    const obj = { print: null };
-    const months = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"];
-    const user_id_operation = req.session.user.user_id;
-    
-      const results = await executeQuery(`SELECT @rownum := @rownum + 1 AS stt, a.*, DATE_FORMAT(a.date_create, '%d/%m/%Y') AS date_create_new, b.user_id_member 
-                                          FROM (SELECT @rownum := 0) r, thang09 a, event_group b 
-                                          WHERE a.id = b.event_id 
-                                            and a.status = 1
-                                            and b.status = 1 
-                                            and b.event_member_id_child = 0
-                                            and year(a.date_create) = year(sysdate())
-                                            AND b.user_id_member in (?)`, [user_id_operation]);
-      obj.print = results;
-    
-    
-    for (const month of months) {
-      const resultT = await executeQuery(`SELECT a.*, b.user_id_member 
-                                          FROM thang${month} a, event_group b 
-                                          WHERE a.id = b.event_id 
-                                            AND b.status = 1 AND b.event_member_id_child = 0
-                                            AND a.status = 1 
-                                            AND b.user_id_member in (?)`, [user_id_operation]);
-      obj[`printT${month}`] = resultT;
-    }
-
-    const print = [];
-
-    res.render("./route-show-thangXX", { Thang, obj: obj, print: print, user_id_operation: user_id_operation, user: req.session.user });
-  } catch (err) {
-    console.error(err);
-    res.status(500).send('Internal Server Error');
-  }
-});
-
-// Table: THANG10 //
-//----------------//
-app.get('/add-thang10', requireLogin, function(req, res){
-  const currentTime = moment();
-  const mysqlTimestamp = currentTime.format('YYYY-MM-DD HH:mm:ss');
-  let date_create = mysqlTimestamp;
-
-  
-  const user_id_perform = req.session.user.user_id;
-  const user_perform = req.session.user.user_name;
-
-  connection.query(`insert into thang10 (date_create, user_create, user_id_create) values(?, ?, ?) `,
-                                        [date_create, user_perform, user_id_perform], function(err){
-    if(!!err) {console.log("error", +err);}
-    else{
-      console.log("Insert into thang10 is Successful!");
-      res.redirect('/add-thang10-member-original');
-      //res.json({"data":"Data Inserted Successfully!"});
-    }
-  }); 
-})
-
-app.get('/add-thang10-member-original', requireLogin, function(req, res) {
-  connection.query('SELECT MAX(id) AS max_id FROM thang10', function(err, rows) {
-    if (err) {
-      console.log('Error:', err);
-      return;
-    }
-
-    const event_id_member = rows[0].max_id;
-    const currentTime = moment().format('YYYY-MM-DD HH:mm:ss');
-    const event_user_id_perform = req.session.user.user_id;
-    const event_user_perform = req.session.user.user_name;
-    
-
-    const query = `INSERT INTO event_group (event_id, 
-                                            user_id_member, user_member, date_add_member, role) 
-                                            VALUES (?, ?, ?, ?, 1)`;
-
-    connection.query(query, [event_id_member, event_user_id_perform, event_user_perform, currentTime], function(err) {
-      if (err) {
-        console.log('Error:', err);
-        return;
-      }
-
-      console.log('Insert into thang10 is successful!');
-      res.redirect('/home');
-    });
-  });
-});
-
-app.get('/del-thang10/(:id)', requireLogin, function(req, res){
-  var id = req.params.id;
-  const currentTime = moment();
-  const mysqlTimestamp = currentTime.format('YYYY-MM-DD HH:mm:ss');
-  let date_delete = mysqlTimestamp;
-  const user_id_delete = req.session.user.user_id;
-  const user_delete = req.session.user.user_name;
-  
-      connection.query(`update thang10 a join EVENT_GROUP b 
-                          on a.id = b.event_id
-                          set a.status = 0, b.event_status = 0, a.date_delete = ?, b.date_remove = ?, b.user_remove = ?, b.user_id_remove = ?
-                          where a.id =? `, [date_delete, date_delete, user_delete, user_id_delete, id], function(err){
-        if(!!err){
-          console.log("error", +err);
-          res.redirect('/home')}
-        else{
-          console.log("Delete id "+ id +" is Successful!");
-          return res.redirect('/home')}
-      });
-})
-
-app.get('/show-thang10', requireLogin, async function(req, res) {
-  try {
-    const Thang = 'Tháng 10';
-    const obj = { print: null };
-    const months = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"];
-    const user_id_operation = req.session.user.user_id;
-    
-      const results = await executeQuery(`SELECT @rownum := @rownum + 1 AS stt, a.*, DATE_FORMAT(a.date_create, '%d/%m/%Y') AS date_create_new, b.user_id_member 
-                                          FROM (SELECT @rownum := 0) r, thang10 a, event_group b 
-                                          WHERE a.id = b.event_id 
-                                            and a.status = 1
-                                            and b.status = 1 
-                                            and b.event_member_id_child = 0
-                                            and year(a.date_create) = year(sysdate())
-                                            AND b.user_id_member in (?)`, [user_id_operation]);
-      obj.print = results;
-    
-    
-    for (const month of months) {
-      const resultT = await executeQuery(`SELECT a.*, b.user_id_member 
-                                          FROM thang${month} a, event_group b 
-                                          WHERE a.id = b.event_id 
-                                            AND b.status = 1 AND b.event_member_id_child = 0
-                                            AND a.status = 1 
-                                            AND b.user_id_member in (?)`, [user_id_operation]);
-      obj[`printT${month}`] = resultT;
-    }
-
-    const print = [];
-
-    res.render("./route-show-thangXX", { Thang, obj: obj, print: print, user_id_operation: user_id_operation, user: req.session.user });
-  } catch (err) {
-    console.error(err);
-    res.status(500).send('Internal Server Error');
-  }
-});
-
-// Table: THANG11 //
-//----------------//
-app.get('/add-thang11', requireLogin, function(req, res){
-  const currentTime = moment();
-  const mysqlTimestamp = currentTime.format('YYYY-MM-DD HH:mm:ss');
-  let date_create = mysqlTimestamp;
-
-  
-  const user_id_perform = req.session.user.user_id;
-  const user_perform = req.session.user.user_name;
-
-  connection.query(`insert into thang11 (date_create, user_create, user_id_create) values(?, ?, ?) `,
-                                        [date_create, user_perform, user_id_perform], function(err){
-    if(!!err) {console.log("error", +err);}
-    else{
-      console.log("Insert into thang11 is Successful!");
-      res.redirect('/add-thang11-member-original');
-      //res.json({"data":"Data Inserted Successfully!"});
-    }
-  }); 
-})
-
-app.get('/add-thang11-member-original', requireLogin, function(req, res) {
-  connection.query('SELECT MAX(id) AS max_id FROM thang11', function(err, rows) {
-    if (err) {
-      console.log('Error:', err);
-      return;
-    }
-
-    const event_id_member = rows[0].max_id;
-    const currentTime = moment().format('YYYY-MM-DD HH:mm:ss');
-    const event_user_id_perform = req.session.user.user_id;
-    const event_user_perform = req.session.user.user_name;
-    
-
-    const query = `INSERT INTO event_group (event_id, 
-                                            user_id_member, user_member, date_add_member, role) 
-                                            VALUES (?, ?, ?, ?, 1)`;
-
-    connection.query(query, [event_id_member, event_user_id_perform, event_user_perform, currentTime], function(err) {
-      if (err) {
-        console.log('Error:', err);
-        return;
-      }
-
-      console.log('Insert into thang11 is successful!');
-      res.redirect('/home');
-    });
-  });
-});
-
-app.get('/del-thang11/(:id)', requireLogin, function(req, res){
-  var id = req.params.id;
-  const currentTime = moment();
-  const mysqlTimestamp = currentTime.format('YYYY-MM-DD HH:mm:ss');
-  let date_delete = mysqlTimestamp;
-  const user_id_delete = req.session.user.user_id;
-  const user_delete = req.session.user.user_name;
-  
-      connection.query(`update thang11 a join EVENT_GROUP b 
-                          on a.id = b.event_id
-                          set a.status = 0, b.event_status = 0, a.date_delete = ?, b.date_remove = ?, b.user_remove = ?, b.user_id_remove = ?
-                          where a.id =? `, [date_delete, date_delete, user_delete, user_id_delete, id], function(err){
-        if(!!err){
-          console.log("error", +err);
-          res.redirect('/home')}
-        else{
-          console.log("Delete id "+ id +" is Successful!");
-          return res.redirect('/home')}
-      });
-})
-
-app.get('/show-thang11', requireLogin, async function(req, res) {
-  try {
-    const Thang = 'Tháng 11';
-    const obj = { print: null };
-    const months = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"];
-    const user_id_operation = req.session.user.user_id;
-    
-      const results = await executeQuery(`SELECT @rownum := @rownum + 1 AS stt, a.*, DATE_FORMAT(a.date_create, '%d/%m/%Y') AS date_create_new, b.user_id_member 
-                                          FROM (SELECT @rownum := 0) r, thang11 a, event_group b 
-                                          WHERE a.id = b.event_id 
-                                            and a.status = 1
-                                            and b.status = 1 
-                                            and b.event_member_id_child = 0
-                                            and year(a.date_create) = year(sysdate())
-                                            AND b.user_id_member in (?)`, [user_id_operation]);
-      obj.print = results;
-    
-    
-    for (const month of months) {
-      const resultT = await executeQuery(`SELECT a.*, b.user_id_member 
-                                          FROM thang${month} a, event_group b 
-                                          WHERE a.id = b.event_id 
-                                            AND b.status = 1 AND b.event_member_id_child = 0
-                                            AND a.status = 1 
-                                            AND b.user_id_member in (?)`, [user_id_operation]);
-      obj[`printT${month}`] = resultT;
-    }
-
-    const print = [];
-
-    res.render("./route-show-thangXX", { Thang, obj: obj, print: print, user_id_operation: user_id_operation, user: req.session.user });
-  } catch (err) {
-    console.error(err);
-    res.status(500).send('Internal Server Error');
-  }
-});
-
-// Table: THANG12 //
-//----------------//
-app.get('/add-thang12', requireLogin, function(req, res){
-  const currentTime = moment();
-  const mysqlTimestamp = currentTime.format('YYYY-MM-DD HH:mm:ss');
-  let date_create = mysqlTimestamp;
-
-  
-  const user_id_perform = req.session.user.user_id;
-  const user_perform = req.session.user.user_name;
-
-  connection.query(`insert into thang12 (date_create, user_create, user_id_create) values(?, ?, ?) `,
-                                        [date_create, user_perform, user_id_perform], function(err){
-    if(!!err) {console.log("error", +err);}
-    else{
-      console.log("Insert into thang12 is Successful!");
-      res.redirect('/add-thang12-member-original');
-      //res.json({"data":"Data Inserted Successfully!"});
-    }
-  }); 
-})
-
-app.get('/add-thang12-member-original', requireLogin, function(req, res) {
-  connection.query('SELECT MAX(id) AS max_id FROM thang12', function(err, rows) {
-    if (err) {
-      console.log('Error:', err);
-      return;
-    }
-
-    const event_id_member = rows[0].max_id;
-    const currentTime = moment().format('YYYY-MM-DD HH:mm:ss');
-    const event_user_id_perform = req.session.user.user_id;
-    const event_user_perform = req.session.user.user_name;
-    
-
-    const query = `INSERT INTO event_group (event_id, 
-                                            user_id_member, user_member, date_add_member, role) 
-                                            VALUES (?, ?, ?, ?, 1)`;
-
-    connection.query(query, [event_id_member, event_user_id_perform, event_user_perform, currentTime], function(err) {
-      if (err) {
-        console.log('Error:', err);
-        return;
-      }
-
-      console.log('Insert into thang12 is successful!');
-      res.redirect('/home');
-    });
-  });
-});
-
-app.get('/del-thang12/(:id)', requireLogin, function(req, res){
-  var id = req.params.id;
-  const currentTime = moment();
-  const mysqlTimestamp = currentTime.format('YYYY-MM-DD HH:mm:ss');
-  let date_delete = mysqlTimestamp;
-  const user_id_delete = req.session.user.user_id;
-  const user_delete = req.session.user.user_name;
-  
-      connection.query(`update thang12 a join EVENT_GROUP b 
-                          on a.id = b.event_id
-                          set a.status = 0, b.event_status = 0, a.date_delete = ?, b.date_remove = ?, b.user_remove = ?, b.user_id_remove = ?
-                          where a.id =? `, [date_delete, date_delete, user_delete, user_id_delete, id], function(err){
-        if(!!err){
-          console.log("error", +err);
-          res.redirect('/home')}
-        else{
-          console.log("Delete id "+ id +" is Successful!");
-          return res.redirect('/home')}
-      });
-})
-
-app.get('/show-thang12', requireLogin, async function(req, res) {
-  try {
-    const Thang = 'Tháng 12';
-    const obj = { print: null };
-    const months = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"];
-    const user_id_operation = req.session.user.user_id;
-    
-      const results = await executeQuery(`SELECT @rownum := @rownum + 1 AS stt, a.*, DATE_FORMAT(a.date_create, '%d/%m/%Y') AS date_create_new, b.user_id_member 
-                                          FROM (SELECT @rownum := 0) r, thang12 a, event_group b 
-                                          WHERE a.id = b.event_id 
-                                            and a.status = 1
-                                            and b.status = 1 
-                                            and b.event_member_id_child = 0
-                                            and year(a.date_create) = year(sysdate())
-                                            AND b.user_id_member in (?)`, [user_id_operation]);
-      obj.print = results;
-    
-    
-    for (const month of months) {
-      const resultT = await executeQuery(`SELECT a.*, b.user_id_member 
-                                          FROM thang${month} a, event_group b 
-                                          WHERE a.id = b.event_id 
-                                            AND b.status = 1 AND b.event_member_id_child = 0
-                                            AND a.status = 1 
-                                            AND b.user_id_member in (?)`, [user_id_operation]);
-      obj[`printT${month}`] = resultT;
-    }
-
-    const print = [];
-
-    res.render("./route-show-thangXX", { Thang, obj: obj, print: print, user_id_operation: user_id_operation, user: req.session.user });
-  } catch (err) {
-    console.error(err);
-    res.status(500).send('Internal Server Error');
-  }
-});
-
-app.listen(8080);
-console.log('Server is listening in http://localhost:8080/home');
